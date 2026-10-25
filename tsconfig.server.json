@@ -11,7 +11,7 @@
     "resolveJsonModule": true,
     "declaration": false,
     "noEmit": false,
-    "outDir": "dist/server",
+    "outDir": "server-dist",
     "rootDir": "src",
     "types": ["node"]
   },

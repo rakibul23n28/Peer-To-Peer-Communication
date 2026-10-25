@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import type { RefreshToken } from "@prisma/client"
 
@@ -32,7 +32,7 @@ export interface NewAccount {
 
 @Injectable()
 export class AuthRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   findActiveUserByUsername(username: string) {
     return this.prisma.user.findFirst({

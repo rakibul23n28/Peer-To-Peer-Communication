@@ -22,6 +22,35 @@ export interface UserIdentity {
   keyVersion: number
 }
 
+export interface ConversationSummary {
+  id: string
+  peer: UserIdentity
+}
+
+export interface UserSearchResult {
+  id: string
+  username: string
+  displayName: string
+}
+
+export interface EncryptedMessage {
+  id: string
+  conversationId: string
+  senderId: string
+  clientMsgId: string
+  seq: string
+  ciphertext: string | null
+  iv: string | null
+  keyVersion: number
+  replyToId: string | null
+  kind: "text" | "file"
+  createdAt: string
+  editedAt: string | null
+  deletedAt: string | null
+  receipts: Array<{ userId: string; status: "delivered" | "read"; at: string }>
+  reactions: Array<{ userId: string; reactionEnc: string; iv: string }>
+}
+
 export interface SessionResponse {
   accessToken: string
 
@@ -327,6 +356,66 @@ export function loginRequest(input: {
 
 export function getMe(): Promise<UserIdentity> {
   return apiRequest<UserIdentity>("/users/me")
+}
+
+export function getConversations(): Promise<{ conversations: ConversationSummary[] }> {
+  return apiRequest<{ conversations: ConversationSummary[] }>("/conversations")
+}
+
+export function searchUsers(query: string): Promise<{ users: UserSearchResult[] }> {
+  return apiRequest<{ users: UserSearchResult[] }>(
+    `/users/search?q=${encodeURIComponent(query)}`,
+  )
+}
+
+export function createConversation(peerId: string): Promise<{ conversation: { id: string } }> {
+  return apiRequest<{ conversation: { id: string } }>("/conversations", {
+    method: "POST",
+    body: JSON.stringify({ peerId }),
+  })
+}
+
+export function getMessages(conversationId: string): Promise<{ messages: EncryptedMessage[]; nextCursor: string | null }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages`)
+}
+
+export function editMessage(
+  conversationId: string,
+  messageId: string,
+  input: { ciphertext: string; iv: string; keyVersion: number },
+): Promise<{ ok: true }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteMessage(conversationId: string, messageId: string): Promise<{ ok: true }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: "DELETE",
+  })
+}
+
+export function setMessageReaction(
+  conversationId: string,
+  messageId: string,
+  input: { reactionEnc: string; iv: string },
+): Promise<{ ok: true }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export function addMessageReceipt(
+  conversationId: string,
+  messageId: string,
+  status: "delivered" | "read",
+): Promise<{ ok: true }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/receipts`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  })
 }
 
 export function replacePublicKey(publicKey: string): Promise<{ ok: true }> {

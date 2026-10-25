@@ -28,6 +28,36 @@ const AuthenticatedHome = lazy(() => import('./auth/AuthenticatedHome'));
 type Phase = 'booting' | 'unreachable' | 'signed-out' | 'key-recovery' | 'save-key-failed' | 'signed-in';
 type AuthMode = 'login' | 'register';
 
+function OrbitMark({ className = '' }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden="true">
+    <circle cx="24" cy="24" r="4" fill="currentColor" />
+    <ellipse cx="24" cy="24" rx="18" ry="8" transform="rotate(-34 24 24)" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="38.5" cy="14" r="2.5" fill="currentColor" />
+  </svg>;
+}
+
+function AuthStory() {
+  return <aside className="auth-story" aria-label="Orbit introduction">
+    <div className="story-topline"><span className="story-brand"><OrbitMark /> orbit<span>.</span></span><span className="story-edition">PRIVATE BY DESIGN / 01</span></div>
+    <div className="story-visual" aria-hidden="true">
+      <div className="story-halo story-halo--outer" />
+      <div className="story-halo story-halo--middle" />
+      <div className="story-halo story-halo--inner" />
+      <div className="story-core"><OrbitMark /></div>
+      <span className="story-satellite story-satellite--one" />
+      <span className="story-satellite story-satellite--two" />
+      <span className="story-coordinate">41° 24′ 12.2″ N</span>
+      <span className="story-coordinate story-coordinate--right">SECURE / ALWAYS</span>
+    </div>
+    <div className="story-copy">
+      <p className="eyebrow"><span /> YOUR PEOPLE, IN YOUR ORBIT</p>
+      <h2>Closer, without the noise.</h2>
+      <p>A quieter place for your conversations. Your keys stay yours; your messages stay private.</p>
+    </div>
+    <div className="story-footer"><span>END-TO-END ENCRYPTED</span><span>BUILT FOR REAL CONNECTION</span></div>
+  </aside>;
+}
+
 function validReturnPath(value: string | null): string | null {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
   try {
@@ -324,12 +354,55 @@ export default function App() {
     }
   }
 
+  async function retryConnection(): Promise<void> {
+    setPhase('booting');
+    setMessage('');
+    try {
+      const token = await refreshAccessToken();
+      if (!token) {
+        setPhase('signed-out');
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+          const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          navigate(`/login?return=${encodeURIComponent(validReturnPath(destination) ?? '/')}`, true);
+        }
+        return;
+      }
+      await verifySession();
+    } catch (error) {
+      if (isNetworkFailure(error)) setPhase('unreachable');
+      else {
+        clearSession();
+        setPhase('signed-out');
+        setMessage(errorMessage(error));
+      }
+    }
+  }
+
   if (phase === 'booting') {
-    return <main className="auth-screen" aria-busy="true"><div className="auth-card splash"><div className="orbit-logo">◌</div><p>Checking your secure session…</p><div className="skeleton-line" /><div className="skeleton-line short" /></div></main>;
+    return <main className="auth-screen auth-screen--boot" aria-busy="true">
+      <AuthStory />
+      <section className="auth-card splash" aria-label="Checking session">
+        <span className="eyebrow"><span className="status-pulse" /> SECURE CONNECTION</span>
+        <div className="boot-orbit"><OrbitMark /></div>
+        <h1>Finding your orbit</h1>
+        <p>Checking your secure session. This should only take a moment.</p>
+        <div className="skeleton-line" /><div className="skeleton-line short" />
+      </section>
+    </main>;
   }
 
   if (phase === 'unreachable') {
-    return <main className="auth-screen"><section className="auth-card" role="alert"><div className="orbit-logo">◌</div><h1>Can’t reach Orbit</h1><p>Your session and device data have not been cleared.</p><button className="primary-button" onClick={() => { setPhase('booting'); window.location.reload(); }}>Retry</button></section></main>;
+    return <main className="auth-screen auth-screen--offline">
+      <AuthStory />
+      <section className="auth-card offline-card" aria-labelledby="offline-title">
+        <div className="offline-heading"><span className="offline-indicator"><i /></span><span className="eyebrow">CONNECTION INTERRUPTED</span></div>
+        <h1 id="offline-title">Can’t reach Orbit</h1>
+        <p>We couldn’t connect just now. Your session and device key are safe on this device.</p>
+        <div className="connection-status"><span className="status-dot" /><span>Waiting for the server</span><span className="status-detail">Nothing was cleared</span></div>
+        <button className="primary-button retry-button" onClick={() => void retryConnection()}><span>Try again</span><span aria-hidden="true">↗</span></button>
+        <p className="offline-footnote">If this keeps happening, check that Orbit’s local server is running.</p>
+      </section>
+    </main>;
   }
 
   if (phase === 'signed-in' && user) {
@@ -339,21 +412,22 @@ export default function App() {
   }
 
   if (phase === 'key-recovery' && pendingUser) {
-    return <main className="auth-screen"><section className="auth-card" aria-labelledby="recovery-title">
-      <div className="orbit-logo">◌</div><h1 id="recovery-title">This device has no matching key</h1>
-      <p>Continuing creates a new key for this device. Messages encrypted to your previous key cannot be read here. Replacing a key changes your security identity.</p>
-      <p className="form-warning">Do not continue unless you understand that old conversations may become unreadable. Key-change notices to contacts are not yet available in this build.</p>
+    return <main className="auth-screen auth-screen--recovery"><AuthStory /><section className="auth-card" aria-labelledby="recovery-title">
+      <span className="eyebrow">DEVICE IDENTITY / ACTION REQUIRED</span>
+      <h1 id="recovery-title">This device has a different key.</h1>
+      <p>Creating a new key means messages encrypted to your previous key may not be readable here. Replacing it changes your security identity.</p>
+      <p className="form-warning">Only continue if you understand the impact. Key-change notices to contacts are not available yet.</p>
       {message && <p className="form-message" role="alert">{message}</p>}
-      <button className="primary-button" disabled={isBusy} onClick={() => void handleKeyRecovery()}>Create a new device key</button>
+      <button className="primary-button" disabled={isBusy} onClick={() => void handleKeyRecovery()}>{isBusy ? 'Securing this device…' : 'Create a new device key'}</button>
       <button className="text-button" disabled={isBusy} onClick={() => void cancelKeyRecovery()}>Cancel and sign out</button>
     </section></main>;
   }
 
   if (phase === 'save-key-failed' && pendingUser) {
-    return <main className="auth-screen"><section className="auth-card" aria-labelledby="save-title">
-      <div className="orbit-logo">◌</div><h1 id="save-title">Save your device key</h1>
+    return <main className="auth-screen auth-screen--recovery"><AuthStory /><section className="auth-card" aria-labelledby="save-title">
+      <span className="eyebrow">DEVICE IDENTITY / NOT SAVED</span><h1 id="save-title">Keep this tab open.</h1>
       <p role="alert">{message}</p>
-      <button className="primary-button" disabled={isBusy} onClick={() => void retrySaveKey()}>Retry saving key</button>
+      <button className="primary-button" disabled={isBusy} onClick={() => void retrySaveKey()}>{isBusy ? 'Saving securely…' : 'Retry saving key'}</button>
       <button className="text-button" disabled={isBusy} onClick={() => void cancelKeyRecovery()}>Sign out</button>
     </section></main>;
   }
@@ -365,26 +439,28 @@ export default function App() {
     void (isRegister ? handleRegister(form) : handleLogin(form));
   };
 
-  return <main className="auth-screen"><section className="auth-card" aria-labelledby="auth-title">
-    <div className="brand auth-brand"><div className="orbit-logo">◌</div><span>orbit<span className="brand-dot">.</span></span></div>
-    <h1 id="auth-title">{isRegister ? 'Create your Orbit' : 'Welcome back'}</h1>
-    <p>{isRegister ? 'A space for the people who matter.' : 'Sign in to continue to your space.'}</p>
+  return <main className="auth-screen auth-screen--auth">
+    <AuthStory />
+    <section className="auth-card" aria-labelledby="auth-title">
+    <div className="auth-card-top"><span className="eyebrow">YOUR SPACE IS WAITING</span><span className="auth-lock" aria-label="Encrypted session"><span /> PRIVATE</span></div>
+    <h1 id="auth-title">{isRegister ? 'Make room for your people.' : 'Good to have you back.'}</h1>
+    <p>{isRegister ? 'A small, private world starts with you.' : 'Sign in to return to your conversations.'}</p>
     <form onSubmit={submit} noValidate>
       <label htmlFor="username">Username</label>
-      <input id="username" name="username" autoComplete="username" autoCapitalize="none" required minLength={3} maxLength={32} pattern="[a-z0-9_.]+" />
+      <input id="username" name="username" autoComplete="username" autoCapitalize="none" placeholder="your.name" required minLength={3} maxLength={32} pattern="[a-z0-9_.]+" />
       {isRegister && <>
         <label htmlFor="password">Password</label>
-        <PasswordField id="password" name="password" autoComplete="new-password" />
+        <PasswordField id="password" name="password" autoComplete="new-password" placeholder="At least 10 characters" />
         <p className="password-hint">At least 10 characters; avoid common passwords.</p>
         <label htmlFor="confirmation">Confirm password</label>
-        <PasswordField id="confirmation" name="confirmation" autoComplete="new-password" />
+        <PasswordField id="confirmation" name="confirmation" autoComplete="new-password" placeholder="Enter it once more" />
       </>}
       {!isRegister && <>
         <label htmlFor="password">Password</label>
-        <PasswordField id="password" name="password" autoComplete="current-password" />
+        <PasswordField id="password" name="password" autoComplete="current-password" placeholder="Your password" />
       </>}
       {message && <p className="form-message" role="alert" tabIndex={-1}>{message}</p>}
-      <button className="primary-button" type="submit" disabled={isBusy}>{isBusy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'}</button>
+      <button className="primary-button" type="submit" disabled={isBusy}><span>{isBusy ? 'Please wait…' : isRegister ? 'Create your space' : 'Enter your space'}</span><span aria-hidden="true">↗</span></button>
     </form>
     <p className="auth-switch">
       {isRegister ? 'Already have an account?' : 'New to Orbit?'}{' '}
@@ -395,7 +471,8 @@ export default function App() {
         navigate(isRegister ? '/login' : '/register');
       }}>{isRegister ? 'Sign in' : 'Create account'}</button>
     </p>
-  </section></main>;
+    </section>
+  </main>;
 }
 
 function PasswordField(props: InputHTMLAttributes<HTMLInputElement>) {

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 
+import { Inject, Logger } from "@nestjs/common"
+
 import {
   ConnectedSocket,
   MessageBody,
@@ -18,6 +20,7 @@ import {
 } from "@prisma/client"
 
 import { z } from "zod"
+import { HttpException } from "@nestjs/common"
 
 import { WebSocket, WebSocketServer as WsServer } from "ws"
 
@@ -57,8 +60,15 @@ const messageSchema = z
       (value.whisperMode === undefined) === (value.whisperTtlS === undefined),
   )
 
+const peerFileRequestSchema = z.object({
+  conversationId: z.string().uuid(),
+  requestId: z.string().uuid(),
+}).strict()
+
 @WebSocketGateway({ path: "/v1/ws", maxPayload: 128 * 1024 })
 export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(OrbitGateway.name)
+
   @WebSocketServer()
   private server!: WsServer
 
@@ -67,13 +77,24 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly authTimers =
     new WeakMap<WebSocket, ReturnType<typeof setTimeout>>()
 
+  private readonly peerFileRequests = new Map<string, {
+    conversationId: string
+    requesterId: string
+    recipientId: string
+    expiresAt: number
+  }>()
+
   constructor(
+    @Inject(AuthService)
     private readonly auth: AuthService,
 
+    @Inject(ConversationsService)
     private readonly conversations: ConversationsService,
 
+    @Inject(MessagesService)
     private readonly messages: MessagesService,
 
+    @Inject(FilesService)
     private readonly files: FilesService,
   ) {}
 
@@ -117,33 +138,72 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: WebSocket,
     @MessageBody() body: unknown,
   ) {
-    const userId = await this.authenticatedUser(client)
+    let clientMsgId = "unknown"
+    try {
+      const userId = await this.authenticatedUser(client)
+      const input = messageSchema.parse(body)
+      clientMsgId = input.clientMsgId
+      const message = await this.messages.create(input.conversationId, userId, {
+        ...input,
+        ciphertext: decodeBase64(input.ciphertext, 1, 65_536, "Ciphertext"),
+        iv: decodeBase64(input.iv, 1, 32, "IV"),
+      })
 
-    const input = messageSchema.parse(body)
+      await this.broadcastToConversation(input.conversationId, userId, {
+        type: "message.created",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: message,
+      })
 
-    const message = await this.messages.create(input.conversationId, userId, {
-      ...input,
+      return {
+        type: "message.ack",
+        id: input.clientMsgId,
+        ts: Date.now(),
+        payload: { messageId: message.id, seq: message.seq },
+      }
+    } catch (error) {
+      this.logger.warn(`Message send failed (${error instanceof Error ? error.name : "unknown"})`)
+      return {
+        type: "message.error",
+        id: clientMsgId,
+        payload: { message: this.safeErrorMessage(error) },
+      }
+    }
+  }
 
-      ciphertext: decodeBase64(input.ciphertext, 1, 65_536, "Ciphertext"),
-
-      iv: decodeBase64(input.iv, 1, 32, "IV"),
-    })
-
-    await this.broadcastToConversation(input.conversationId, userId, {
-      type: "message.created",
-
-      id: randomUUID(),
-
-      ts: Date.now(),
-
-      payload: message,
-    })
-
-    return {
-      type: "message.ack",
-      id: input.clientMsgId,
-      ts: Date.now(),
-      payload: { messageId: message.id, seq: message.seq },
+  @SubscribeMessage("message.edit")
+  async editMessage(
+    @ConnectedSocket() client: WebSocket,
+    @MessageBody() body: unknown,
+  ) {
+    const requestSchema = z.object({
+      conversationId: z.string().uuid(),
+      messageId: z.string().uuid(),
+      ciphertext: z.string(),
+      iv: z.string(),
+      keyVersion: z.number().int().positive(),
+    }).strict()
+    let messageId = "unknown"
+    try {
+      const userId = await this.authenticatedUser(client)
+      const input = requestSchema.parse(body)
+      messageId = input.messageId
+      await this.messages.edit(input.conversationId, input.messageId, userId, {
+        ciphertext: decodeBase64(input.ciphertext, 1, 65_536, "Ciphertext"),
+        iv: decodeBase64(input.iv, 1, 32, "IV"),
+        keyVersion: input.keyVersion,
+      })
+      await this.broadcastToConversation(input.conversationId, userId, {
+        type: "message.edited",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: { messageId: input.messageId },
+      })
+      return { type: "message.edit.ack", id: messageId, payload: { ok: true } }
+    } catch (error) {
+      this.logger.warn(`Message edit failed (${error instanceof Error ? error.name : "unknown"})`)
+      return { type: "message.error", id: messageId, payload: { message: this.safeErrorMessage(error) } }
     }
   }
 
@@ -312,6 +372,61 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return result
   }
 
+  @SubscribeMessage("file.peer.request")
+  async requestPeerFileShare(
+    @ConnectedSocket() client: WebSocket,
+    @MessageBody() body: unknown,
+  ) {
+    const userId = await this.authenticatedUser(client)
+    const input = peerFileRequestSchema.parse(body)
+    const [requesterId, recipientId] = await this.conversations.memberIds(input.conversationId, userId)
+    const recipient = requesterId === userId ? recipientId : requesterId
+    this.peerFileRequests.set(input.requestId, {
+      conversationId: input.conversationId,
+      requesterId: userId,
+      recipientId: recipient,
+      expiresAt: Date.now() + 120_000,
+    })
+    this.sendToUser(recipient, {
+      type: "file.peer.request",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { requestId: input.requestId, conversationId: input.conversationId, requesterId: userId },
+    })
+    return { type: "file.peer.request.ack", id: input.requestId, payload: { delivered: true } }
+  }
+
+  @SubscribeMessage("file.peer.response")
+  async respondToPeerFileShare(
+    @ConnectedSocket() client: WebSocket,
+    @MessageBody() body: unknown,
+  ) {
+    const userId = await this.authenticatedUser(client)
+    const input = z.object({
+      conversationId: z.string().uuid(),
+      requestId: z.string().uuid(),
+      accepted: z.boolean(),
+    }).strict().parse(body)
+    const request = this.peerFileRequests.get(input.requestId)
+    if (
+      !request ||
+      request.expiresAt < Date.now() ||
+      request.conversationId !== input.conversationId ||
+      request.recipientId !== userId
+    ) {
+      this.peerFileRequests.delete(input.requestId)
+      return { type: "file.peer.response.error", id: input.requestId, payload: { message: "This file-sharing request has expired or is no longer available." } }
+    }
+    this.peerFileRequests.delete(input.requestId)
+    this.sendToUser(request.requesterId, {
+      type: "file.peer.response",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { requestId: input.requestId, conversationId: input.conversationId, accepted: input.accepted },
+    })
+    return { type: "file.peer.response.ack", id: input.requestId, payload: { ok: true } }
+  }
+
   private async authenticatedUser(client: WebSocket): Promise<string> {
     const userId = this.users.get(client)
 
@@ -333,7 +448,8 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<void> {
     const members = await this.conversations.memberIds(conversationId, senderId)
 
-    const serialized = JSON.stringify(event)
+    const type = String(event.type ?? "orbit.event")
+    const serialized = JSON.stringify({ event: type, data: event })
 
     for (const client of this.server.clients) {
       if (client.readyState !== WebSocket.OPEN) continue
@@ -342,5 +458,26 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       if (userId && members.includes(userId)) client.send(serialized)
     }
+  }
+
+  private sendToUser(userId: string, event: Record<string, unknown>): void {
+    const serialized = JSON.stringify({ event: event.type, data: event })
+    for (const client of this.server.clients) {
+      if (client.readyState === WebSocket.OPEN && this.users.get(client) === userId) {
+        client.send(serialized)
+      }
+    }
+  }
+
+  private safeErrorMessage(error: unknown): string {
+    if (error instanceof HttpException) {
+      const response = error.getResponse()
+      if (typeof response === "object" && response !== null && "message" in response) {
+        return String(response.message)
+      }
+      return typeof response === "string" ? response : "The request could not be completed."
+    }
+    if (error instanceof z.ZodError) return "The request was invalid. Check the message and retry."
+    return "Orbit could not save this message. Check the connection and retry."
   }
 }

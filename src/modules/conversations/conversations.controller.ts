@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common"
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common"
 
 import { z } from "zod"
 
@@ -13,7 +21,10 @@ const createConversationSchema = z
 @Controller("v1/conversations")
 @UseGuards(AuthGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService) {}
+  constructor(
+    @Inject(ConversationsService)
+    private readonly conversations: ConversationsService,
+  ) {}
 
   @Get()
   list(@Req() request: AuthRequest) {

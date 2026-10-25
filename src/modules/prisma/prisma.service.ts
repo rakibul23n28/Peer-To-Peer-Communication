@@ -25,8 +25,14 @@ export class PrismaService
       this.logger.error(
         "Could not connect to the configured PostgreSQL database",
       )
-
-      throw error
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        this.logger.error(`Database connection error code: ${error.code}`)
+      }
     }
   }
 

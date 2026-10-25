@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Inject,
   Param,
   Patch,
   Post,
@@ -63,7 +64,7 @@ const statusSchema = z
 @Controller("v1/conversations/:conversationId/files")
 @UseGuards(AuthGuard)
 export class FilesController {
-  constructor(private readonly files: FilesService) {}
+  constructor(@Inject(FilesService) private readonly files: FilesService) {}
 
   @Post("offer")
   offer(

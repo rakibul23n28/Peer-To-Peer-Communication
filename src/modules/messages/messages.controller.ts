@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Post,
   Put,
@@ -52,6 +53,14 @@ const createMessageSchema = z
 
 const receiptSchema = z.object({ status: z.nativeEnum(ReceiptStatus) }).strict()
 
+const editMessageSchema = z
+  .object({
+    ciphertext: z.string().min(1).max(90_000),
+    iv: z.string().min(1).max(128),
+    keyVersion: z.number().int().positive(),
+  })
+  .strict()
+
 const reactionSchema = z
   .object({
     reactionEnc: z.string().min(1).max(6000),
@@ -63,7 +72,9 @@ const reactionSchema = z
 @Controller("v1/conversations/:conversationId/messages")
 @UseGuards(AuthGuard)
 export class MessagesController {
-  constructor(private readonly messages: MessagesService) {}
+  constructor(
+    @Inject(MessagesService) private readonly messages: MessagesService,
+  ) {}
 
   @Get()
   list(
@@ -127,6 +138,24 @@ export class MessagesController {
 
       receiptSchema.parse(body).status,
     )
+  }
+
+  @Put(":messageId")
+  edit(
+    @Req() request: AuthRequest,
+    @Param("conversationId") conversationId: string,
+    @Param("messageId") messageId: string,
+    @Body() body: unknown,
+  ) {
+    z.string().uuid().parse(conversationId)
+    z.string().uuid().parse(messageId)
+    const input = editMessageSchema.parse(body)
+
+    return this.messages.edit(conversationId, messageId, request.userId, {
+      ciphertext: decodeBase64(input.ciphertext, 1, 65_536, "Ciphertext"),
+      iv: decodeBase64(input.iv, 1, 32, "IV"),
+      keyVersion: input.keyVersion,
+    })
   }
 
   @Put(":messageId/reaction")

@@ -6,7 +6,7 @@ import {
   randomUUID,
 } from "node:crypto"
 
-import { HttpException, Injectable } from "@nestjs/common"
+import { HttpException, Inject, Injectable } from "@nestjs/common"
 
 import argon2 from "argon2"
 
@@ -71,7 +71,9 @@ export interface AuthenticatedIdentity {
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly repository: AuthRepository) {}
+  constructor(
+    @Inject(AuthRepository) private readonly repository: AuthRepository,
+  ) {}
 
   async register(
     input: {
@@ -487,12 +489,12 @@ function encryptSuccessor(token: string): Buffer {
 
   const cipher = createCipheriv("aes-256-gcm", encryptionKey, iv)
 
-  return Buffer.concat([
-    iv,
-    cipher.getAuthTag(),
+  const encrypted = Buffer.concat([
     cipher.update(token, "utf8"),
     cipher.final(),
   ])
+
+  return Buffer.concat([iv, cipher.getAuthTag(), encrypted])
 }
 
 function decryptSuccessor(encrypted: Uint8Array): string {

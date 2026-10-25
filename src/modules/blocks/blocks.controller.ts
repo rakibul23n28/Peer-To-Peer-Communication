@@ -2,6 +2,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Put,
   Req,
@@ -17,7 +18,7 @@ import { BlocksService } from "./blocks.service.js"
 @Controller("v1/users/me/blocks")
 @UseGuards(AuthGuard)
 export class BlocksController {
-  constructor(private readonly blocks: BlocksService) {}
+  constructor(@Inject(BlocksService) private readonly blocks: BlocksService) {}
 
   @Get()
   async list(@Req() request: AuthRequest) {

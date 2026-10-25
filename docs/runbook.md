@@ -21,6 +21,7 @@
 - `npm test` runs fast unit tests.
 - `npm run test:integration` starts a throwaway PostgreSQL container, runs `prisma migrate reset`, executes the repository integration suite, then runs `scripts/verify-db.sql` and removes only that test container/volume.
 - A successful `GET /v1/healthz` confirms the HTTP process is responding. `GET /v1/readyz` also checks database connectivity.
+- The reverse proxy must forward WebSocket upgrades on the configured API base path ending in `/ws` to the server's `/v1/ws` gateway. The Vite development proxy enables WebSocket upgrades on `/api` and rewrites `/api/ws` to `/v1/ws`.
 - Production deployment requires private network access, TLS, a least-privilege database role, zero seeded rows, and passing integration plus browser E2E verification.
 - Use a least-privilege runtime database identity for NestJS; reserve DDL privileges for the controlled migration connection.
 

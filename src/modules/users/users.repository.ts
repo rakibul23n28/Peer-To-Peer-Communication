@@ -1,21 +1,17 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
 @Injectable()
 export class UsersRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   search(query: string) {
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
 
-        OR: [
-          { username: { contains: query.toLowerCase(), mode: "insensitive" } },
-
-          { displayName: { contains: query, mode: "insensitive" } },
-        ],
+        username: { contains: query.toLowerCase(), mode: "insensitive" },
       },
 
       select: { id: true, username: true, displayName: true },

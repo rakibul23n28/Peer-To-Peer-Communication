@@ -1,4 +1,6 @@
-import { Injectable } from "@nestjs/common"
+import { randomUUID } from "node:crypto"
+
+import { Inject, Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
@@ -20,7 +22,7 @@ const publicUserSelection = {
 
 @Injectable()
 export class ConversationsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async list(userId: string) {
     const rows = await this.prisma.conversation.findMany({
@@ -33,7 +35,10 @@ export class ConversationsRepository {
         ],
       },
 
-      include: {
+      select: {
+        id: true,
+        userA: true,
+        userB: true,
         memberA: { select: publicUserSelection },
         memberB: { select: publicUserSelection },
       },
@@ -104,15 +109,17 @@ export class ConversationsRepository {
 
     if (blocked) throw notFound("User not found")
 
-    return this.prisma.conversation.upsert({
-      where: { userA_userB: { userA: ordered[0], userB: ordered[1] } },
+    const [conversation] = await this.prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO conversations (id, user_a, user_b)
+      VALUES (${randomUUID()}::uuid, ${ordered[0]}::uuid, ${ordered[1]}::uuid)
+      ON CONFLICT (user_a, user_b) DO UPDATE
+        SET user_a = EXCLUDED.user_a
+      RETURNING id
+    `
 
-      create: { userA: ordered[0], userB: ordered[1] },
+    if (!conversation) throw new Error("Conversation upsert returned no row")
 
-      update: {},
-
-      select: { id: true },
-    })
+    return conversation
   }
 
   async getMemberConversation(conversationId: string, userId: string) {
@@ -123,7 +130,7 @@ export class ConversationsRepository {
         OR: [{ userA: userId }, { userB: userId }],
       },
 
-      select: { id: true, userA: true, userB: true, lastSeq: true },
+      select: { id: true, userA: true, userB: true },
     })
 
     if (!conversation) throw notFound("Conversation not found")

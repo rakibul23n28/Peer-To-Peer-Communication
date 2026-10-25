@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { MessageKind, ReceiptStatus, WhisperMode } from "@prisma/client"
 
@@ -6,7 +6,10 @@ import { MessagesRepository, type NewMessage } from "./messages.repository.js"
 
 @Injectable()
 export class MessagesService {
-  constructor(private readonly repository: MessagesRepository) {}
+  constructor(
+    @Inject(MessagesRepository)
+    private readonly repository: MessagesRepository,
+  ) {}
 
   list(conversationId: string, userId: string, cursor?: string) {
     return this.repository.list(conversationId, userId, cursor)
@@ -14,6 +17,15 @@ export class MessagesService {
 
   create(conversationId: string, userId: string, input: NewMessage) {
     return this.repository.create(conversationId, userId, input)
+  }
+
+  edit(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    input: { ciphertext: Buffer; iv: Buffer; keyVersion: number },
+  ) {
+    return this.repository.edit(conversationId, messageId, userId, input)
   }
 
   addReceipt(

@@ -1,10 +1,13 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { ConversationsRepository } from "./conversations.repository.js"
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly repository: ConversationsRepository) {}
+  constructor(
+    @Inject(ConversationsRepository)
+    private readonly repository: ConversationsRepository,
+  ) {}
 
   async list(userId: string) {
     return { conversations: await this.repository.list(userId) }

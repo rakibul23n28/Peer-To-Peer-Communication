@@ -47,6 +47,7 @@ react(),
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          ws: true,
           rewrite: (requestPath) => requestPath.replace(/^\/api/, '/v1'),
         },
         '/ws': {
@@ -111,7 +112,7 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return html.replace(`<!-- ${slotName} -->`, content)
   }
 
-  const title = config.title ?? "Figma Make App"
+  const title = config.title ?? "orbit."
   const description = config.description ?? ''
   // Imported HTML keeps its own favicon; new Makes default to the Make product icon.
   const favicon = config.icons?.icon ?? '/favicon.svg'

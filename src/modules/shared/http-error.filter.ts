@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from "@nestjs/common"
 
 import { Prisma } from "@prisma/client"
@@ -14,6 +15,8 @@ import { ZodError } from "zod"
 
 @Catch()
 export class HttpErrorFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpErrorFilter.name)
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp()
 
@@ -94,6 +97,29 @@ export class HttpErrorFilter implements ExceptionFilter {
       code = "DATABASE_UNAVAILABLE"
 
       message = "Database is not available"
+    }
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const errorName =
+        exception instanceof Error ? exception.constructor.name : "UnknownError"
+      const errorCode =
+        typeof exception === "object" &&
+        exception !== null &&
+        "code" in exception &&
+        typeof exception.code === "string"
+          ? exception.code
+          : "none"
+      const errorMessage =
+        exception instanceof TypeError
+          ? exception.message.replace(/[\r\n]+/g, " ").slice(0, 240)
+          : undefined
+      const errorLocation =
+        exception instanceof Error
+          ? exception.stack?.split("\n").slice(1, 3).join(" <- ")
+          : undefined
+      this.logger.error(
+        `Request failed with ${errorName} (code: ${errorCode})${errorMessage ? `: ${errorMessage}` : ""}${errorLocation ? ` at ${errorLocation}` : ""}`,
+      )
     }
 
     response.status(status).json({

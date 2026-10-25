@@ -15,10 +15,10 @@ import { HttpErrorFilter } from "../modules/shared/http-error.filter.js"
 import { AppModule } from "./app.module.js"
 
 const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-  logger: ["error", "warn"],
+  logger: ["error", "warn", "log"],
 })
 
-app.useLogger(["error", "warn"])
+app.useLogger(["error", "warn", "log"])
 
 app.useBodyParser("json", { limit: "1mb" })
 

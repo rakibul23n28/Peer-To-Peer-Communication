@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
@@ -6,7 +6,7 @@ import { notFound } from "../shared/http-error.filter.js"
 
 @Injectable()
 export class BlocksRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   list(blockerId: string) {
     return this.prisma.block

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { MessageKind, Prisma, ReceiptStatus, WhisperMode } from "@prisma/client"
 
@@ -31,8 +31,10 @@ export interface NewMessage {
 @Injectable()
 export class MessagesRepository {
   constructor(
+    @Inject(PrismaService)
     private readonly prisma: PrismaService,
 
+    @Inject(ConversationsRepository)
     private readonly conversations: ConversationsRepository,
   ) {}
 
@@ -102,13 +104,12 @@ export class MessagesRepository {
         if (!reply) throw notFound("Reply target not found")
       }
 
-      const seq = conversation.last_seq + 1n
-
-      await tx.conversation.update({
-        where: { id: conversationId },
-
-        data: { lastSeq: seq },
+      const latest = await tx.message.findFirst({
+        where: { conversationId },
+        orderBy: { seq: "desc" },
+        select: { seq: true },
       })
+      const seq = (latest?.seq ?? 0n) + 1n
 
       const message = await tx.message.create({
         data: {
@@ -137,6 +138,35 @@ export class MessagesRepository {
       })
 
       return serializeMessage(message)
+    })
+  }
+
+  async edit(
+    conversationId: string,
+    messageId: string,
+    senderId: string,
+    input: { ciphertext: Buffer; iv: Buffer; keyVersion: number },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockConversation(tx, conversationId, senderId)
+
+      const message = await tx.message.findFirst({
+        where: { id: messageId, conversationId, senderId, deletedAt: null },
+        select: { id: true },
+      })
+      if (!message) throw notFound("Message not found")
+
+      await tx.message.update({
+        where: { id: messageId },
+        data: {
+          ciphertext: prismaBytes(input.ciphertext),
+          iv: prismaBytes(input.iv),
+          keyVersion: input.keyVersion,
+          editedAt: new Date(),
+        },
+      })
+
+      return { ok: true as const }
     })
   }
 
@@ -263,14 +293,13 @@ export async function lockConversation(
   conversationId: string,
 
   userId: string,
-): Promise<{ id: string; user_a: string; user_b: string; last_seq: bigint }> {
+): Promise<{ id: string; user_a: string; user_b: string }> {
   const rows = await tx.$queryRaw<{
     id: string
     user_a: string
     user_b: string
-    last_seq: bigint
   }[]>`
-    SELECT id, user_a, user_b, last_seq
+    SELECT id, user_a, user_b
       FROM conversations
      WHERE id = ${conversationId}::uuid
      FOR UPDATE

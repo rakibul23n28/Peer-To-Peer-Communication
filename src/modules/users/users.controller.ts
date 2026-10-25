@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Put,
   Query,
@@ -27,15 +28,20 @@ const publicKeySchema = z
 
 @Controller("v1/users")
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(@Inject(UsersService) private readonly users: UsersService) {}
 
   @Get("search")
 
   @UseGuards(AuthGuard)
-  search(@Query("q") query: string | undefined) {
+  async search(
+    @Query("q") query: string | undefined,
+    @Req() request: AuthRequest,
+  ) {
     const input = z.string().min(3).max(64).parse(query)
 
-    return { users: this.users.search(input) }
+    const users = await this.users.search(input)
+
+    return { users: users.filter((user) => user.id !== request.userId) }
   }
 
   @Get(":id/public-key")

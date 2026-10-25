@@ -1,7 +1,407 @@
-import { useRef, useState } from 'react'
-import { Button, Input, Textarea, Heading } from './shared/ui/primitives'
-const people = [ {name:'Alex Morgan', initials:'AM',color:'purple',text:'This is exactly the feeling I had in mind.',time:'Now',online:true}, {name:'Sophie Chen',initials:'SC',color:'peach',text:'Sent you a moodboard',time:'12:42',unread:2,online:true}, {name:'James Wilson',initials:'JW',color:'blue',text:'See you on the other side.',time:'Yesterday'}, {name:'Maya Patel',initials:'MP',color:'pink',text:'The little details make all the difference.',time:'Yesterday'}, {name:'Daniel Kim',initials:'DK',color:'green',text:'That sounds like a plan.',time:'Mon'} ]
-function Icon({name,size=20}:{name:string;size?:number}) { const paths:Record<string,React.ReactNode>={ search:<><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></>,plus:<path d="M12 5v14M5 12h14"/>, arrow:<><path d="M12 19V5m-6 6 6-6 6 6"/></>, shield:<><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></>, lock:<><rect x="6" y="10" width="12" height="10" rx="3"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/></>,clip:<path d="m9 13 6-6a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7L13 3"/>, smile:<><circle cx="12" cy="12" r="9"/><path d="M8 14q4 5 8 0M8 8h1m6 0h1"/></>, settings:<><circle cx="12" cy="12" r="4"/><path d="m9 3-1 3-3 1-2 4 2 3 1 4 4 1 3 2 4-2 1-4 3-3-2-4-4-1z"/></>,file:<><path d="M14 3H5v18h14V8zM14 3v6h5M8 14h8m-8 3h5"/></>,check:<path d="m5 12 4 4 10-10"/>,download:<><path d="M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4"/></>, more:<><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></>};return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]||paths.shield}</svg> }
-function Avatar({initials,color='purple',online=false,large=false}:{initials:string;color?:string;online?:boolean;large?:boolean}) {return <div className={`avatar ${color} ${large?'large':''}`}>{initials}{online&&<i/>}</div>}
-export default function App(){const [active,setActive]=useState(0);const [search,setSearch]=useState('');const [draft,setDraft]=useState('');const [messages,setMessages]=useState<Record<number,string[]>>({});const [settings,setSettings]=useState(false);const [light,setLight]=useState(false);const [whisper,setWhisper]=useState(false);const [mobile,setMobile]=useState(false);const [notice,setNotice]=useState('');const fileRef=useRef<HTMLInputElement>(null);const person=people[active];function send(){if(!draft.trim())return;setMessages(p=>({...p,[active]:[...(p[active]||[]),draft.trim()]}));setDraft('')}
-return <div className={`orbit-app ${light?'light':''} ${mobile?'show-chat':''}`}><aside className="sidebar"><div className="brand"><div className="orbit-logo">◌</div><span>orbit<span className="brand-dot">.</span></span><span className="beta">BETA</span></div><div className="sidebar-heading"><Heading>Your space</Heading><Button className="icon-button" aria-label="New conversation" onClick={()=>{setSearch('');setNotice('Choose a contact below to start a conversation.')}}><Icon name="plus"/></Button></div><div className="search"><Icon name="search" size={17}/><Input aria-label="Search conversations" placeholder="Find a conversation" value={search} onChange={e=>setSearch(e.target.value)}/><kbd>⌘ K</kbd></div><div className="list-label">CONVERSATIONS <span>{people.length}</span></div><nav className="conversations">{people.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())).map(p=>{const index=people.indexOf(p);return <Button key={p.name} className={`conversation ${active===index?'selected':''}`} onClick={()=>{setActive(index);setMobile(true)}}><Avatar initials={p.initials} color={p.color} online={p.online}/><div className="conversation-copy"><div className="conversation-top"><strong>{p.name}</strong><time>{p.time}</time></div><div className="conversation-preview"><span>{p.text}</span>{p.unread?<b>{p.unread}</b>:index===0?<span className="tiny-check">✓✓</span>:null}</div></div></Button>})}</nav><div className="space-note"><div className="mini-orbits"><span/><span/></div><strong>A little closer. A lot more private.</strong><p>Just you, your people, and the space<br/>between. Nothing in the middle.</p><div><Icon name="lock" size={12}/> END-TO-END ENCRYPTED</div></div><div className="profile"><Avatar initials="JL" color="sage"/><div><strong>Jamie Lee</strong><span><i/> Available in your orbit</span></div><Button className="icon-button" aria-label="Open settings" onClick={()=>setSettings(true)}><Icon name="settings"/></Button></div></aside><main className="chat"><header className="chat-header"><Button className="back icon-button" onClick={()=>setMobile(false)} aria-label="Back to conversations">←</Button><Avatar initials={person.initials} color={person.color} online={person.online}/><div><strong>{person.name}</strong><span className="online-label">{person.online?'Online · in your orbit':'Offline · leave a little note'}</span></div><div className="header-actions"><span className="secure-label"><Icon name="lock" size={13}/> Private conversation</span><Button className="icon-button" aria-label="Conversation details" onClick={()=>setNotice('This is a local interface preview. Direct connection and E2EE are not connected yet.')}><Icon name="more"/></Button></div></header><section className="link-panel"><div className="link-top"><span><i/> LIVE LINK</span><span>YOUR OWN LITTLE UNIVERSE</span><Button aria-label="About direct connection" className="info-button" onClick={()=>setNotice('Live Link is a visual preview. No peer connection is currently established.')}>i</Button></div><div className="orbital-scene"><div className="orbital-ring ring-one"/><div className="orbital-ring ring-two"/><div className="orbital-line"><span/><span/><span/><span/><span/></div><div className="orbital-person"><Avatar initials="JL" color="sage" large/><span>You</span></div><div className="link-pill"><Icon name="lock" size={12}/> A space for just two</div><div className="orbital-person"><Avatar initials={person.initials} color={person.color} large/><span>{person.name.split(' ')[0]}</span></div></div><div className="link-caption"><span className="connection-dot"/> Your conversation, in a shared orbit. <span className="divider">/</span><span>Local preview</span></div></section><section className="message-area" aria-label="Messages"><div className="date-divider"><span/> TODAY, JUNE 18 <span/></div><div className="privacy-note"><Icon name="lock" size={12}/> Only the two of you belong in this conversation.</div><div className="message-group received"><Avatar initials={person.initials} color={person.color}/><div><div className="bubble">Hey! Been exploring that direction we talked about.</div><div className="bubble">Something a little quieter. A little more human.</div><time>12:38</time></div></div><div className="message-group sent"><div><div className="bubble">Less noise, more connection. I’m all in.</div><time>12:39 <span>✓✓</span></time></div></div><div className="message-group received"><Avatar initials={person.initials} color={person.color}/><div><div className="bubble">Exactly. Here’s a little piece of the universe for you.</div><div className="file-card"><div className="file-art"><div className="planet"/><div className="file-art-caption">A STUDY IN STILLNESS <span>01 — 06</span></div></div><div className="file-details"><div className="file-icon"><Icon name="file"/></div><div><strong>Quiet orbits.fig</strong><span>18.4 MB <span className="file-dot">·</span> Figma document</span></div><Button aria-label="File preview information" className="download-button" onClick={()=>setNotice('Sample file metadata only. No file bytes are stored or available for download.')}><Icon name="download" size={18}/></Button></div><div className="file-footer"><span><Icon name="shield" size={12}/> Metadata preview</span><span>SHA-256 <Icon name="check" size={12}/></span></div></div><time>12:41</time></div></div><div className="message-group sent"><div><div className="bubble">This is exactly the feeling I had in mind.<br/>Feels like a deep breath.</div><time>12:42 <span>✓✓</span></time></div></div>{(messages[active]||[]).map((m,i)=><div className="message-group sent" key={i}><div><div className="bubble">{m}</div><time>Just now · local draft <span>✓</span></time></div></div>)}<div className="end-space"/></section><footer className="composer-area"><div className="composer"><Button className="icon-button" aria-label="Attach file" onClick={()=>fileRef.current?.click()}><Icon name="plus"/></Button><input type="file" hidden ref={fileRef} onChange={e=>{if(e.target.files?.length)setNotice('File selection works. Peer-to-peer transfer will be implemented in a later increment.')}}/><Textarea rows={1} aria-label="Message" placeholder={whisper?'Write a whisper…':'A little thought, a whole universe…'} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/><Button className="icon-button" aria-label="Insert smile" onClick={()=>setDraft(d=>d+' :)')}><Icon name="smile"/></Button><Button className={`icon-button whisper ${whisper?'enabled':''}`} aria-label="Toggle whisper mode preview" aria-pressed={whisper} onClick={()=>setWhisper(!whisper)}><Icon name="lock" size={18}/></Button><Button className="send-button" aria-label="Send local message" onClick={send} disabled={!draft.trim()}><Icon name="arrow"/></Button></div><div className="composer-hint"><span><Icon name="shield" size={12}/> Your words stay between you. Always.</span><span>↵ to send <span className="hint-divider">·</span> Shift + ↵ for a new line</span></div></footer></main>{notice&&<div className="notice" role="status">{notice}<Button aria-label="Dismiss notice" onClick={()=>setNotice('')}>×</Button></div>}{settings&&<div className="modal-backdrop" onClick={()=>setSettings(false)}><section className="settings-modal" role="dialog" aria-modal="true" aria-label="Your space settings" onClick={e=>e.stopPropagation()}><div className="settings-title"><Heading>Your space, your rules.</Heading><Button className="icon-button" onClick={()=>setSettings(false)} aria-label="Close settings">×</Button></div><p>A quieter corner of the internet.</p><Button className="setting-row" onClick={()=>setLight(!light)}><span>Appearance</span><span>{light?'Light':'Dark'} →</span></Button><div className="privacy-card"><Icon name="shield"/><strong>What the server can see</strong><p>This first increment is a local UI prototype. No server is connected, and messages are not transmitted. Encryption, device keys, and file transfers are not implemented yet.</p></div><span className="settings-footnote">ORBIT · BUILT FOR JUST TWO</span></section></div>}</div>}
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import type { FormEvent, InputHTMLAttributes } from 'react';
+import {
+  ApiError,
+  clearSession,
+  getMe,
+  getAccessToken,
+  loginRequest,
+  refreshAccessToken,
+  registerRequest,
+  replacePublicKey,
+  setAccessToken,
+  signOutRequest,
+  subscribeAuth,
+  type SessionResponse,
+  type UserIdentity,
+} from './auth/session';
+import {
+  generateDeviceIdentity,
+  getDeviceIdentity,
+  saveDeviceIdentity,
+  type DeviceIdentity,
+} from './auth/keyStore';
+import './auth/auth.css';
+
+const AuthenticatedHome = lazy(() => import('./auth/AuthenticatedHome'));
+
+type Phase = 'booting' | 'unreachable' | 'signed-out' | 'key-recovery' | 'save-key-failed' | 'signed-in';
+type AuthMode = 'login' | 'register';
+
+function validReturnPath(value: string | null): string | null {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin) return null;
+    if (parsed.pathname === '/login' || parsed.pathname === '/register') return '/';
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+function returnPath(): string {
+  return validReturnPath(new URLSearchParams(window.location.search).get('return')) ?? '/';
+}
+
+function navigate(path: string, replace = false): void {
+  if (replace) window.history.replaceState(null, '', path);
+  else window.history.pushState(null, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError || (error instanceof ApiError && error.status >= 500);
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      const seconds = Math.max(1, error.retryAfterSeconds ?? 60);
+      return `Too many attempts. Try again in ${seconds} seconds.`;
+    }
+    if (error.code === 'INVALID_CREDENTIALS') return 'Username or password is incorrect';
+    if (error.code === 'USERNAME_UNAVAILABLE') return 'Unable to create an account with those details.';
+    if (error.code === 'WEAK_PASSWORD') return 'Choose a stronger password.';
+    if (error.code === 'INVALID_REQUEST') return 'Check the highlighted fields and try again.';
+    if (error.status >= 500) return "Can't reach Orbit. Check your connection and try again.";
+    return error.message;
+  }
+  return "Can't reach Orbit. Check your connection and try again.";
+}
+
+export default function App() {
+  const [phase, setPhase] = useState<Phase>('booting');
+  const [mode, setMode] = useState<AuthMode>(window.location.pathname === '/register' ? 'register' : 'login');
+  const [path, setPath] = useState(window.location.pathname);
+  const [user, setUser] = useState<UserIdentity | null>(null);
+  const [pendingUser, setPendingUser] = useState<UserIdentity | null>(null);
+  const [pendingIdentity, setPendingIdentity] = useState<DeviceIdentity | null>(null);
+  const [pendingRegistrationKey, setPendingRegistrationKey] = useState<DeviceIdentity | null>(null);
+  const [message, setMessage] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
+
+  const validateDeviceKey = useCallback(async (identity: UserIdentity) => {
+    let local: DeviceIdentity | null;
+    try {
+      local = await getDeviceIdentity(identity.id);
+    } catch {
+      setPendingUser(identity);
+      setMessage('This browser could not read its saved key. Check site storage permissions or continue through explicit key recovery.');
+      setPhase('key-recovery');
+      return false;
+    }
+    if (!local || local.fingerprint !== identity.fingerprint) {
+      setPendingUser(identity);
+      setPhase('key-recovery');
+      return false;
+    }
+    setUser(identity);
+    setPhase('signed-in');
+    return true;
+  }, []);
+
+  const verifySession = useCallback(async () => {
+    const identity = await getMe();
+    await validateDeviceKey(identity);
+  }, [validateDeviceKey]);
+
+  useEffect(() => {
+    const updatePath = () => {
+      setPath(window.location.pathname);
+      if (window.location.pathname === '/register') setMode('register');
+      else if (window.location.pathname === '/login') setMode('login');
+    };
+    window.addEventListener('popstate', updatePath);
+    return () => window.removeEventListener('popstate', updatePath);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const token = await refreshAccessToken();
+        if (!active) return;
+        if (!token) {
+          setPhase('signed-out');
+          if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+            const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+            navigate(`/login?return=${encodeURIComponent(validReturnPath(destination) ?? '/')}`, true);
+          }
+          return;
+        }
+        await verifySession();
+      } catch (error) {
+        if (!active) return;
+        if (isNetworkFailure(error)) setPhase('unreachable');
+        else {
+          clearSession();
+          setPhase('signed-out');
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [verifySession]);
+
+  useEffect(() => subscribeAuth((event) => {
+    if (event.type === 'sign-out' || event.type === 'session-expired') {
+      setUser(null);
+      setPendingUser(null);
+      setPhase('signed-out');
+      setMessage(event.type === 'session-expired' ? 'Session expired. Please sign in again.' : '');
+      if (window.location.pathname !== '/login') {
+        const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        navigate(`/login?return=${encodeURIComponent(validReturnPath(destination) ?? '/')}`, true);
+      }
+    }
+  }), []);
+
+  useEffect(() => {
+    if (phase === 'signed-in' && (path === '/login' || path === '/register')) {
+      navigate(returnPath(), true);
+    }
+  }, [path, phase]);
+
+  async function completeSession(session: SessionResponse): Promise<void> {
+    setAccessToken(session.accessToken);
+    setPendingUser(session.user);
+    try {
+      const token = await refreshAccessToken();
+      if (!token) {
+        setMessage('Orbit could not confirm its secure session cookie. Enable cookies and try again.');
+        setPhase('signed-out');
+        return;
+      }
+      const identity = await getMe();
+      await validateDeviceKey(identity);
+    } catch (error) {
+      if (isNetworkFailure(error)) setPhase('unreachable');
+      else {
+        clearSession();
+        setPhase('signed-out');
+        setMessage(errorMessage(error));
+      }
+    }
+  }
+
+  async function handleLogin(form: FormData): Promise<void> {
+    const username = String(form.get('username') ?? '').trim().toLowerCase();
+    const password = String(form.get('password') ?? '');
+    setIsBusy(true);
+    setMessage('');
+    try {
+      await completeSession(await loginRequest({ username, password }));
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleRegister(form: FormData): Promise<void> {
+    const username = String(form.get('username') ?? '').trim().toLowerCase();
+    const password = String(form.get('password') ?? '');
+    const confirmation = String(form.get('confirmation') ?? '');
+    if (!/^[a-z0-9_.]{3,32}$/.test(username)) {
+      setMessage('Username must be 3–32 lowercase letters, numbers, dots, or underscores.');
+      return;
+    }
+    if (password.length < 10 || /^(password|password123|1234567890|qwerty12345)$/i.test(password)) {
+      setMessage('Choose a password with at least 10 characters that is not commonly used.');
+      return;
+    }
+    if (password !== confirmation) {
+      setMessage('Passwords do not match.');
+      return;
+    }
+
+    setIsBusy(true);
+    setMessage('');
+    try {
+      const identity = pendingRegistrationKey ?? await generateDeviceIdentity('pending');
+      if (!pendingRegistrationKey) setPendingRegistrationKey(identity);
+      let session: SessionResponse;
+      try {
+        session = await registerRequest({
+          username,
+          password,
+          publicKey: identity.publicKeyBase64,
+        });
+      } catch (registrationError) {
+        if (!(registrationError instanceof ApiError) || registrationError.code !== 'USERNAME_UNAVAILABLE') {
+          throw registrationError;
+        }
+        session = await loginRequest({ username, password });
+        setAccessToken(session.accessToken);
+        if (session.user.fingerprint !== identity.fingerprint) {
+          setPendingUser(session.user);
+          setPhase('key-recovery');
+          return;
+        }
+      }
+      const savedIdentity = { ...identity, userId: session.user.id };
+      setAccessToken(session.accessToken);
+      setPendingUser(session.user);
+      setPendingIdentity(savedIdentity);
+      try {
+        await saveDeviceIdentity(savedIdentity);
+      } catch {
+        setPhase('save-key-failed');
+        setMessage('Your account was created, but this browser could not save its private key. Keep this page open and retry saving before leaving.');
+        return;
+      }
+      setPendingRegistrationKey(null);
+      await completeSession(session);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleKeyRecovery(): Promise<void> {
+    if (!pendingUser) return;
+    setIsBusy(true);
+    setMessage('');
+    try {
+      const identity = pendingIdentity ?? await generateDeviceIdentity(pendingUser.id);
+      setPendingIdentity(identity);
+      await saveDeviceIdentity(identity);
+      await replacePublicKey(identity.publicKeyBase64);
+      const updatedUser = await getMe();
+      setUser(updatedUser);
+      setPendingUser(null);
+      setPendingIdentity(null);
+      setPhase('signed-in');
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function retrySaveKey(): Promise<void> {
+    if (!pendingIdentity || !pendingUser) return;
+    setIsBusy(true);
+    try {
+      await saveDeviceIdentity(pendingIdentity);
+      await completeSession({ accessToken: getAccessToken() ?? '', user: pendingUser });
+    } catch {
+      setMessage('The key still could not be saved. Check browser storage permissions and retry.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function cancelKeyRecovery(): Promise<void> {
+    setIsBusy(true);
+    try {
+      await signOutRequest();
+    } catch {
+      clearSession(true);
+    } finally {
+      setPendingUser(null);
+      setPhase('signed-out');
+      navigate('/login', true);
+      setIsBusy(false);
+    }
+  }
+
+  async function handleSignOut(): Promise<void> {
+    setIsBusy(true);
+    setMessage('');
+    try {
+      await signOutRequest();
+      setUser(null);
+      setPhase('signed-out');
+      navigate('/login', true);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  if (phase === 'booting') {
+    return <main className="auth-screen" aria-busy="true"><div className="auth-card splash"><div className="orbit-logo">◌</div><p>Checking your secure session…</p><div className="skeleton-line" /><div className="skeleton-line short" /></div></main>;
+  }
+
+  if (phase === 'unreachable') {
+    return <main className="auth-screen"><section className="auth-card" role="alert"><div className="orbit-logo">◌</div><h1>Can’t reach Orbit</h1><p>Your session and device data have not been cleared.</p><button className="primary-button" onClick={() => { setPhase('booting'); window.location.reload(); }}>Retry</button></section></main>;
+  }
+
+  if (phase === 'signed-in' && user) {
+    return <Suspense fallback={<main className="auth-screen" aria-busy="true"><div className="auth-card splash"><p>Opening Orbit…</p><div className="skeleton-line" /></div></main>}>
+      <AuthenticatedHome user={user} onSignOut={handleSignOut} busy={isBusy} message={message} />
+    </Suspense>;
+  }
+
+  if (phase === 'key-recovery' && pendingUser) {
+    return <main className="auth-screen"><section className="auth-card" aria-labelledby="recovery-title">
+      <div className="orbit-logo">◌</div><h1 id="recovery-title">This device has no matching key</h1>
+      <p>Continuing creates a new key for this device. Messages encrypted to your previous key cannot be read here. Replacing a key changes your security identity.</p>
+      <p className="form-warning">Do not continue unless you understand that old conversations may become unreadable. Key-change notices to contacts are not yet available in this build.</p>
+      {message && <p className="form-message" role="alert">{message}</p>}
+      <button className="primary-button" disabled={isBusy} onClick={() => void handleKeyRecovery()}>Create a new device key</button>
+      <button className="text-button" disabled={isBusy} onClick={() => void cancelKeyRecovery()}>Cancel and sign out</button>
+    </section></main>;
+  }
+
+  if (phase === 'save-key-failed' && pendingUser) {
+    return <main className="auth-screen"><section className="auth-card" aria-labelledby="save-title">
+      <div className="orbit-logo">◌</div><h1 id="save-title">Save your device key</h1>
+      <p role="alert">{message}</p>
+      <button className="primary-button" disabled={isBusy} onClick={() => void retrySaveKey()}>Retry saving key</button>
+      <button className="text-button" disabled={isBusy} onClick={() => void cancelKeyRecovery()}>Sign out</button>
+    </section></main>;
+  }
+
+  const isRegister = mode === 'register' || path === '/register';
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    void (isRegister ? handleRegister(form) : handleLogin(form));
+  };
+
+  return <main className="auth-screen"><section className="auth-card" aria-labelledby="auth-title">
+    <div className="brand auth-brand"><div className="orbit-logo">◌</div><span>orbit<span className="brand-dot">.</span></span></div>
+    <h1 id="auth-title">{isRegister ? 'Create your Orbit' : 'Welcome back'}</h1>
+    <p>{isRegister ? 'A space for the people who matter.' : 'Sign in to continue to your space.'}</p>
+    <form onSubmit={submit} noValidate>
+      <label htmlFor="username">Username</label>
+      <input id="username" name="username" autoComplete="username" autoCapitalize="none" required minLength={3} maxLength={32} pattern="[a-z0-9_.]+" />
+      {isRegister && <>
+        <label htmlFor="password">Password</label>
+        <PasswordField id="password" name="password" autoComplete="new-password" />
+        <p className="password-hint">At least 10 characters; avoid common passwords.</p>
+        <label htmlFor="confirmation">Confirm password</label>
+        <PasswordField id="confirmation" name="confirmation" autoComplete="new-password" />
+      </>}
+      {!isRegister && <>
+        <label htmlFor="password">Password</label>
+        <PasswordField id="password" name="password" autoComplete="current-password" />
+      </>}
+      {message && <p className="form-message" role="alert" tabIndex={-1}>{message}</p>}
+      <button className="primary-button" type="submit" disabled={isBusy}>{isBusy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'}</button>
+    </form>
+    <p className="auth-switch">
+      {isRegister ? 'Already have an account?' : 'New to Orbit?'}{' '}
+      <button className="text-button" onClick={() => {
+        setMessage('');
+        setMode(isRegister ? 'login' : 'register');
+        setPendingRegistrationKey(null);
+        navigate(isRegister ? '/login' : '/register');
+      }}>{isRegister ? 'Sign in' : 'Create account'}</button>
+    </p>
+  </section></main>;
+}
+
+function PasswordField(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false);
+  return <div className="password-field">
+    <input {...props} type={visible ? 'text' : 'password'} required minLength={10} maxLength={128} />
+    <button className="password-toggle" type="button" aria-label={visible ? 'Hide password' : 'Show password'} onClick={() => setVisible((value) => !value)}>{visible ? 'Hide' : 'Show'}</button>
+  </div>;
+}

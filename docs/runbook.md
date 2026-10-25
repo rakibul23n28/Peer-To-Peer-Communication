@@ -1,24 +1,31 @@
-# Orbit development runbook
+# Orbit development and deployment runbook
 
-## Local configuration
+## Environment
 
-1. Copy `.env.example` to `.env`.
-2. Set `DATABASE_URL` to the Supabase Postgres pooler URL. The Supabase publishable and secret API keys are not substitutes for this URL.
-3. Replace both development signing secrets with distinct random values of at least 32 characters. Rotate any key previously shared outside a secret manager.
-4. Keep `.env` local; it is ignored by Git.
+1. Copy `.env.example` to the ignored `.env`.
+2. Set `DATABASE_URL` to the PostgreSQL runtime connection value. If it points to a pooler, also configure `DIRECT_URL` to the provider's direct TLS endpoint for migrations.
+3. Set unique random `JWT_SECRET` and `COOKIE_SECRET` values. Do not reuse or share database credentials.
+4. Keep database values in the server environment only. Do not prefix them with `VITE_`, expose them through browser configuration, or commit `.env`.
 
-## Database migration
+## Schema changes
 
-Apply SQL files under `supabase/migrations` with the Supabase CLI linked to the intended project. Review the target project before applying migrations. Never put user data, message plaintext, file bytes, SDP, or ICE candidates in seed fixtures or migration content.
+- Edit `prisma/schema.prisma` and create migrations with `npm run db:migrate:dev` against a development database.
+- Deploy reviewed migrations with `npm run db:migrate:deploy`.
+- Do not run migration reset commands against a hosted or production database. The integration runner resets only the isolated Docker database defined in `docker-compose.test.yml`.
+- For the pre-Prisma Orbit schema, back up and verify the target first, then run `npm run db:migrate:baseline:legacy` followed by `npm run db:migrate:deploy`. The baseline command records migration history only; the forward-only `20261025170000_legacy_schema_transition` migration performs the schema transition. Do not run this baseline command against an empty or different database.
+- The transition preserves active rows, initializes `last_seq` from existing messages, normalizes deleted usernames to the 32-character limit, and removes content attached to tombstones. It disables row-level security and removes policies on the nine application tables. Review these changes and the target before deploying.
+- Raw SQL checks Prisma cannot express belong in the generated migration SQL. Do not create manual runtime DDL.
 
-## Readiness and debugging
+## Tests and database verification
 
-- `GET /v1/healthz` confirms the HTTP process is responding.
-- `GET /v1/readyz` confirms the configured database can be queried. A structured 503 means the URL, network, or database needs attention.
-- Do not enable live frontend mode while auth, conversation, or WebSocket routes are placeholders.
-- File bytes must travel only over the peer-to-peer data channel. The backend is not a file upload/download service.
-- Never log request bodies, access tokens, refresh cookies, ciphertext, encrypted file metadata, SDP, or ICE candidates.
+- `npm test` runs fast unit tests.
+- `npm run test:integration` starts a throwaway PostgreSQL container, runs `prisma migrate reset`, executes the repository integration suite, then runs `scripts/verify-db.sql` and removes only that test container/volume.
+- A successful `GET /v1/healthz` confirms the HTTP process is responding. `GET /v1/readyz` also checks database connectivity.
+- Production deployment requires private network access, TLS, a least-privilege database role, zero seeded rows, and passing integration plus browser E2E verification.
+- Use a least-privilege runtime database identity for NestJS; reserve DDL privileges for the controlled migration connection.
 
-## Current limitation
+## Data handling
 
-The route and UI integration is incomplete. This runbook documents configuration and safety boundaries; it does not claim that auth, messaging, or file transfer are production-ready.
+- Only encrypted message ciphertext, encrypted filenames/thumbnails/reactions, and opaque hashes may be persisted. No plaintext body, filename, thumbnail, or file bytes belong in columns or logs.
+- Prisma query logging is disabled, so parameters are never printed.
+- File bytes travel only over the peer-to-peer data channel; the backend stores offer metadata only.

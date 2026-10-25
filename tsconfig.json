@@ -19,5 +19,12 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src/App.tsx",
+    "src/main.tsx",
+    "src/auth/**/*.ts",
+    "src/auth/**/*.tsx",
+    "src/**/*.d.ts",
+    "vite.config.ts"
+  ]
 }

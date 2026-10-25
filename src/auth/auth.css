@@ -1,0 +1,189 @@
+.auth-screen {
+  display: grid;
+  min-height: 100dvh;
+  padding: 24px;
+  place-items: center;
+  background: radial-gradient(ellipse at 50% 20%, #28213355, transparent 50%), #101115;
+  color: #e7e7ec;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.auth-card {
+  width: min(100%, 440px);
+  padding: 36px;
+  border: 1px solid #34303f;
+  border-radius: 18px;
+  background: #18191e;
+  box-shadow: 0 24px 80px #0005;
+}
+
+.auth-card h1 {
+  margin: 28px 0 8px;
+  font-family: Manrope, sans-serif;
+  font-size: 24px;
+  letter-spacing: -.6px;
+}
+
+.auth-card > p {
+  color: #aaa8b4;
+  line-height: 1.6;
+}
+
+.auth-brand {
+  margin: 0 0 24px;
+  font-family: Manrope, sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+}
+
+.auth-brand .orbit-logo,
+.auth-card > .orbit-logo {
+  color: #c0b0f5;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 26px;
+}
+
+.auth-card label {
+  margin-top: 9px;
+  color: #d4d2dd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 1px solid #393942;
+  border-radius: 9px;
+  background: #121317;
+  color: #e7e7ec;
+}
+
+.auth-card input:focus-visible,
+.auth-card button:focus-visible {
+  outline: 2px solid #c0b0f5;
+  outline-offset: 3px;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 64px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  padding: 6px;
+  color: #c0b0f5;
+  font-size: 11px;
+}
+
+.password-hint {
+  margin: 0;
+  color: #8f8d98;
+  font-size: 11px;
+}
+
+.primary-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border: 1px solid #b4a2ed;
+  border-radius: 9px;
+  background: #b4a2ed;
+  color: #211a30;
+  font-weight: 700;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.text-button {
+  padding: 4px;
+  color: #c0b0f5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-switch {
+  margin: 22px 0 0;
+  text-align: center;
+}
+
+.form-message,
+.form-warning {
+  padding: 11px 12px;
+  border: 1px solid #765e58;
+  border-radius: 9px;
+  background: #332522;
+  color: #f0c2ac !important;
+  font-size: 12px;
+}
+
+.form-warning {
+  margin: 18px 0;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 22px 0;
+  padding: 14px;
+  border: 1px solid #393942;
+  border-radius: 10px;
+  background: #121317;
+}
+
+.status-card span {
+  overflow-wrap: anywhere;
+  color: #aaa8b4;
+  font-size: 11px;
+}
+
+.splash {
+  text-align: center;
+}
+
+.skeleton-line {
+  height: 12px;
+  margin: 20px auto 0;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #25252d, #37323f, #25252d);
+  background-size: 200% 100%;
+  animation: auth-shimmer 1.5s linear infinite;
+}
+
+.skeleton-line.short {
+  width: 65%;
+  margin-top: 10px;
+}
+
+@keyframes auth-shimmer {
+  to { background-position: -200% 0; }
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 26px 22px; }
+  .auth-screen { padding: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line { animation: none; }
+}

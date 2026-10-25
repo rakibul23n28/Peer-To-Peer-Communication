@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum MessageKind {
+  text
+  file
+
+  @@map("message_kind")
+}
+
+enum WhisperMode {
+  view_once
+  timed
+
+  @@map("whisper_mode")
+}
+
+enum ReceiptStatus {
+  delivered
+  read
+}
+
+enum FileTransferStatus {
+  offered
+  accepted
+  transferring
+  received
+  declined
+  cancelled
+  expired
+  failed
+
+  @@map("file_transfer_status")
+}
+
+model User {
+  id             String           @id @default(uuid()) @db.Uuid
+  username       String           @unique @db.VarChar(32)
+  passwordHash   String           @map("password_hash")
+  displayName    String           @map("display_name") @db.VarChar(80)
+  avatarSeed     String           @map("avatar_seed")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  keys           UserKey[]
+  refreshTokens  RefreshToken[]
+  conversationsA Conversation[]   @relation("conversation_a")
+  conversationsB Conversation[]   @relation("conversation_b")
+  messages       Message[]        @relation("message_sender")
+  receipts       MessageReceipt[]
+  reactions      Reaction[]
+  files          FileTransfer[]   @relation("file_sender")
+  blocksSent     Block[]          @relation("blocker")
+  blocksReceived Block[]          @relation("blocked")
+
+  @@map("users")
+}
+
+model UserKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  publicKey   Bytes     @map("public_key")
+  fingerprint String
+  keyVersion  Int       @map("key_version")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyVersion])
+  @@index([userId])
+  @@map("user_keys")
+}
+
+model RefreshToken {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  familyId       String    @map("family_id") @db.Uuid
+  tokenHash      Bytes     @unique @map("token_hash")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  rotatedAt      DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  userAgentHash  Bytes?    @map("user_agent_hash")
+  successorEnc   Bytes?    @map("successor_enc")
+  graceExpiresAt DateTime? @map("grace_expires_at") @db.Timestamptz(6)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model Conversation {
+  id        String         @id @default(uuid()) @db.Uuid
+  userA     String         @map("user_a") @db.Uuid
+  userB     String         @map("user_b") @db.Uuid
+  lastSeq   BigInt         @default(0) @map("last_seq")
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  memberA   User           @relation("conversation_a", fields: [userA], references: [id], onDelete: Cascade)
+  memberB   User           @relation("conversation_b", fields: [userB], references: [id], onDelete: Cascade)
+  messages  Message[]
+  files     FileTransfer[]
+
+  @@unique([userA, userB])
+  @@index([userB])
+  @@map("conversations")
+}
+
+model Message {
+  id             String           @id @default(uuid()) @db.Uuid
+  conversationId String           @map("conversation_id") @db.Uuid
+  senderId       String           @map("sender_id") @db.Uuid
+  clientMsgId    String           @map("client_msg_id") @db.Uuid
+  seq            BigInt
+  ciphertext     Bytes?
+  iv             Bytes?
+  keyVersion     Int              @map("key_version")
+  replyToId      String?          @map("reply_to_id") @db.Uuid
+  kind           MessageKind
+  whisperMode    WhisperMode?     @map("whisper_mode")
+  whisperTtlS    Int?             @map("whisper_ttl_s")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  editedAt       DateTime?        @map("edited_at") @db.Timestamptz(6)
+  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User             @relation("message_sender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo        Message?         @relation("message_replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]        @relation("message_replies")
+  receipts       MessageReceipt[]
+  reactions      Reaction[]
+  file           FileTransfer?
+
+  @@unique([senderId, clientMsgId])
+  @@unique([conversationId, seq])
+  @@index([conversationId, seq(sort: Desc)])
+  @@index([senderId])
+  @@index([replyToId])
+  @@map("messages")
+}
+
+model MessageReceipt {
+  messageId String        @map("message_id") @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  status    ReceiptStatus
+  at        DateTime      @default(now()) @db.Timestamptz(6)
+  message   Message       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, status])
+  @@index([userId])
+  @@map("message_receipts")
+}
+
+model Reaction {
+  messageId   String  @map("message_id") @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  reactionEnc Bytes   @map("reaction_enc")
+  iv          Bytes
+  message     Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("reactions")
+}
+
+model FileTransfer {
+  fileId         String             @id @map("file_id") @db.Uuid
+  messageId      String             @unique @map("message_id") @db.Uuid
+  conversationId String             @map("conversation_id") @db.Uuid
+  senderId       String             @map("sender_id") @db.Uuid
+  nameEnc        Bytes              @map("name_enc")
+  nameIv         Bytes              @map("name_iv")
+  size           BigInt
+  mime           String             @db.VarChar(255)
+  sha256         Bytes
+  thumbEnc       Bytes?             @map("thumb_enc")
+  thumbIv        Bytes?             @map("thumb_iv")
+  width          Int?
+  height         Int?
+  status         FileTransferStatus
+  updatedAt      DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  message        Message            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation   Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User               @relation("file_sender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([updatedAt])
+  @@map("file_transfers")
+}
+
+model Block {
+  blockerId String   @map("blocker_id") @db.Uuid
+  blockedId String   @map("blocked_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("blocks")
+}

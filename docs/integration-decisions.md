@@ -2,29 +2,34 @@
 
 ## Decisions
 
-| Decision | Reason | Owner |
-| --- | --- | --- |
-| Keep the existing Fastify server instead of converting the repository to NestJS. | The repository's configured server and routes are Fastify; replacing the framework is a separate migration with no behavioral benefit for this integration pass. | Orbit maintainers |
-| Keep Supabase Postgres as the intended persistence layer and do not use Supabase Auth, Storage, or Realtime. | This preserves the zero-knowledge backend contract supplied for Orbit. | Orbit maintainers |
-| Treat binary REST/WS fields as standard base64 and timestamps as ISO-8601. | This follows the supplied integration contract and is the selected wire convention pending shared schema generation. | Orbit maintainers |
-| Keep the browser in mock mode until authenticated API and WebSocket flows are implemented and verified. | The current React screen has no session flow, HTTP adapter, encryption store, or contract-validated WebSocket client. | Orbit maintainers |
+| Decision | Reason |
+| --- | --- |
+| Use NestJS with Prisma ORM and PostgreSQL. | Keep HTTP/controllers and repositories separated, with Prisma lifecycle managed by a Nest provider. |
+| Keep credentials and database access in the Nest server environment. | The browser only calls same-origin API routes and never receives database connection values. |
+| Store encrypted message/file metadata as PostgreSQL `Bytes`; do not store file bytes or plaintext content. | Preserve the end-to-end encryption boundary. |
+| Assign message sequence numbers, persist file offers with their chat item, and delete accounts inside a single Prisma transaction per operation. | Avoid partially persisted domain operations. |
+| Use migrations for production and a Docker-backed throwaway database for integration tests. | Validate an empty-database install without risking a configured hosted database. |
 
-## Current implementation status
+## Implementation status
 
-| Surface | Expected contract | Current repository status |
-| --- | --- | --- |
-| `GET /v1/healthz` | Health check | Implemented; route smoke tested |
-| `GET /v1/readyz` | Database readiness | Checks the configured PostgreSQL URL and returns a structured 503 when unavailable |
-| Auth routes | Register, login, refresh, logout | Routes are placeholders; do not use for real accounts |
-| Users, blocks, key rotation | Persisted authenticated operations | Routes are placeholders |
-| Conversations and history | Persisted membership-checked data | Routes are placeholders |
-| WebSocket events | Authenticated, validated, authorized relay | Current handler rejects the first incoming message; no live messaging |
-| React UI | `mock` and `live` adapters | UI still uses local sample data and local-only message state |
-| File transfer | WebRTC-only bytes with encrypted metadata | Not implemented |
+| Area | Status |
+| --- | --- |
+| Prisma model | All nine requested models are defined in `prisma/schema.prisma`; binary values use `Bytes`. |
+| Database constraints | The initial migration includes ordered conversation pairs, idempotency/pair uniqueness, encrypted tombstones, and binary-size checks. |
+| Auth and users | Repository-backed register/login/refresh/logout, profile/key lookup and replacement, and transactional account deletion. |
+| Conversations and messages | Membership-checked repository operations; message sequence allocation is transactionally serialized. |
+| Receipts, reactions, blocks | Persisted through dedicated repositories and authenticated controllers. |
+| File metadata | Encrypted filename/thumbnail metadata and hash persist; file bytes are never accepted by the API. Offer and chat item commit together. |
+| WebSocket | Nest gateway authenticates through the auth service and delegates persistence to services/repositories. Prisma is not called from the gateway. |
+| Browser UI | The current signed-in screen is still account-only; chat UI has not yet been connected to the new APIs. |
+| Production verification | Not complete until deploy networking/least-privilege are configured and the Docker integration suite, verification SQL, and browser E2E matrix pass. |
 
-## Remaining prerequisites
+## Required deployment settings
 
-- Set `DATABASE_URL` to the Supabase Postgres pooler URL in the local ignored `.env`; the supplied API keys are not a database connection string.
-- Rotate the server secret key that was shared in chat. Do not put the rotated value in source control or send it in chat.
-- Apply `supabase/migrations/0001_orbit_schema.sql` using the Supabase migration workflow before enabling any database-backed routes.
-- Do not set `VITE_BACKEND_MODE=live` until all listed placeholders have been replaced by tested implementations.
+- Set `DATABASE_URL` only in the Nest server environment. If the provider's runtime URL is pooled, set `DIRECT_URL` to the provider's direct TLS endpoint for migrations.
+- Configure database firewall/network rules so only the Nest server can reach PostgreSQL. Require TLS and a least-privilege application role; do not expose database ingress publicly.
+- Rotate any credentials previously shared in chat. Never commit `.env` or put database values in `VITE_*` variables.
+- Run `npm run db:migrate:deploy` during deployment. Use `npm run db:migrate:dev` only against development databases. Existing databases with tables but no Prisma migration history require a reviewed baseline/transition before deploy; never reset them to force the initial migration.
+- For the known pre-Prisma Orbit schema, use `npm run db:migrate:baseline:legacy` once after a backup, then `npm run db:migrate:deploy` to apply the forward transition. Do not use this baseline against an empty database.
+- Run `npm run test:integration` against the disposable Docker database. It resets only that throwaway database and runs `scripts/verify-db.sql` after the repository integration suite.
+- Production databases must begin with zero rows. There is no production seed; any seed data must be explicitly restricted to development/test.

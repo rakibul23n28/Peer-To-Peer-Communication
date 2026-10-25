@@ -1,4 +1,4 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'node:fs'
@@ -11,6 +11,13 @@ import siteConfiguration from './.figma/make/site.json'
 export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === 'development'
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
+  const apiPort = loadEnv(mode, process.cwd(), 'API_PORT').API_PORT || '3000'
+  const backendMode = env.VITE_BACKEND_MODE || (mode === 'production' ? '' : 'live')
+  if (mode === 'production' && backendMode !== 'live') {
+    throw new Error('Production builds require VITE_BACKEND_MODE=live.')
+  }
+  const apiTarget = `http://127.0.0.1:${apiPort}`
 
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
@@ -36,6 +43,18 @@ react(),
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/api/, '/v1'),
+        },
+        '/ws': {
+          target: apiTarget,
+          ws: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/ws/, '/v1/ws'),
+        },
+      },
       watch: {
         ignored: [
           '**/.figma/**',
@@ -45,6 +64,10 @@ react(),
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
+    },
+    define: {
+      'import.meta.env.VITE_BACKEND_MODE': JSON.stringify(backendMode || 'mock'),
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(env.VITE_API_BASE_URL || '/api'),
     },
   }
 })

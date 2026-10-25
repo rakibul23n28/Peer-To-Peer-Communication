@@ -142,7 +142,10 @@ export class ConversationsRepository {
             }
           : null,
       }
-    })
+    }).sort((left, right) =>
+      new Date(right.lastMessage?.createdAt ?? 0).getTime() -
+      new Date(left.lastMessage?.createdAt ?? 0).getTime(),
+    )
   }
 
   async create(userId: string, peerId: string) {

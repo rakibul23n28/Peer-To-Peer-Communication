@@ -393,7 +393,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (loadId !== threadLoadIdRef.current) return;
       setThreadMessages([
         ...decrypted,
-        ...pending.filter((item) => !persistedIds.has(item.clientMsgId)),
+        ...pending.filter((item) => !persistedIds.has(item.clientMsgId)).map((item) => ({
+          ...item,
+          sendState: flushingMessagesRef.current.has(item.clientMsgId)
+            ? 'sending' as const
+            : item.sendState,
+        })),
       ]);
       setThreadError('');
 
@@ -413,7 +418,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
       }
     }
-  }, [connection, deviceIdentity, selected, user.id]);
+  }, [deviceIdentity, selected, user.id]);
 
   useEffect(() => {
     setThreadMessages([]);
@@ -429,7 +434,43 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     const unsubscribe = subscribeOrbitEvents((envelope) => {
       if (envelope.event === 'message.new' || envelope.event === 'message.created') {
         const event = envelope.data as { payload?: EncryptedMessage };
-        if (event.payload?.conversationId === selectedId) void refreshThread();
+        const newMessage = event.payload;
+        if (newMessage) {
+          setConversations((current) => {
+            const next = current.map((conversation) => conversation.id === newMessage.conversationId
+              ? {
+                  ...conversation,
+                  lastMessage: newMessage.ciphertext && newMessage.iv &&
+                    (!conversation.lastMessage ||
+                      new Date(newMessage.createdAt).getTime() >=
+                        new Date(conversation.lastMessage.createdAt ?? 0).getTime())
+                    ? {
+                        id: newMessage.id,
+                        senderId: newMessage.senderId,
+                        clientMsgId: newMessage.clientMsgId,
+                        seq: newMessage.seq,
+                        ciphertext: newMessage.ciphertext,
+                        iv: newMessage.iv,
+                        keyVersion: newMessage.keyVersion,
+                        kind: newMessage.kind,
+                        createdAt: newMessage.createdAt,
+                      }
+                    : conversation.lastMessage,
+                  unreadCount: newMessage.senderId === user.id ||
+                    newMessage.conversationId === selectedId ||
+                    conversation.lastMessage?.id === newMessage.id ||
+                    conversation.lastMessage?.clientMsgId === newMessage.clientMsgId
+                    ? conversation.unreadCount
+                    : conversation.unreadCount + 1,
+                }
+              : conversation);
+            return [...next].sort((a, b) =>
+              new Date(b.lastMessage?.createdAt ?? 0).getTime() -
+              new Date(a.lastMessage?.createdAt ?? 0).getTime(),
+            );
+          });
+          if (newMessage.conversationId === selectedId) void refreshThread();
+        }
       }
       if (envelope.event === 'message.edited' || envelope.event === 'message.deleted') {
         void refreshThread();
@@ -455,7 +496,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       }
     });
     return unsubscribe;
-  }, [refreshThread, selectedId]);
+  }, [refreshThread, selectedId, user.id]);
 
   useEffect(() => {
     if (connection !== 'connected') attemptedMessagesRef.current.clear();
@@ -693,6 +734,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
   }
 
+  function connectionLabel() {
+    if (connection === 'connected') return 'Connected';
+    if (connection === 'connecting') return 'Connecting…';
+    if (connection === 'auth_failed') return 'Session expired';
+    if (connection === 'reconnecting') return 'Reconnecting';
+    if (connection === 'idle') return 'Idle';
+    return 'Offline';
+  }
+
   async function openConversation(person: UserSearchResult) {
     setActionError('');
     try {
@@ -708,15 +758,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : 'Could not start this conversation.');
     }
-  }
-
-  function connectionLabel() {
-    if (connection === 'connected') return 'Connected';
-    if (connection === 'connecting') return 'Connecting…';
-    if (connection === 'auth_failed') return 'Session expired';
-    if (connection === 'reconnecting') return 'Reconnecting';
-    if (connection === 'idle') return 'Idle';
-    return 'Offline';
   }
 
   return <main className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}`}>

@@ -1,0 +1,10 @@
+{
+  "description": "A privacy-first chat app for one-to-one conversations, with end-to-end encrypted messaging and direct peer-to-peer file sharing that keeps files off servers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -25,6 +25,7 @@ import {
 } from './orbitSocket';
 import { decryptMessage, encryptMessage } from './messageCrypto';
 import { getDeviceIdentity, type DeviceIdentity } from './keyStore';
+import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
 
 interface AuthenticatedHomeProps {
   user: UserIdentity;
@@ -34,16 +35,104 @@ interface AuthenticatedHomeProps {
 }
 
 type Dialog = 'search' | 'security' | 'settings' | null;
-type ThreadMessage = EncryptedMessage & { plaintext: string; decryptedReactions: string[]; sendState?: 'queued' | 'sending' | 'sent' };
+type ThreadMessage = EncryptedMessage & { plaintext: string; decryptedReactions: string[]; sendState?: 'queued' | 'sending' | 'sent' | 'failed'; sendError?: string };
 type OutboxMessage = {
   conversationId: string;
   clientMsgId: string;
   ciphertext: string;
   iv: string;
   keyVersion: number;
+  senderKeyVersion: number;
+  recipientKeyVersion: number;
   kind: 'text';
   replyToId?: string;
+  peerPublicKey?: string;
+  queuedAt?: string;
 };
+
+function isOutboxMessage(value: unknown): value is OutboxMessage {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<OutboxMessage>;
+  return typeof item.conversationId === 'string' &&
+    typeof item.clientMsgId === 'string' &&
+    typeof item.ciphertext === 'string' &&
+    typeof item.iv === 'string' &&
+    typeof item.keyVersion === 'number' &&
+    (item.senderKeyVersion === undefined || typeof item.senderKeyVersion === 'number') &&
+    (item.recipientKeyVersion === undefined || typeof item.recipientKeyVersion === 'number') &&
+    item.kind === 'text' &&
+    (item.replyToId === undefined || typeof item.replyToId === 'string') &&
+    (item.peerPublicKey === undefined || typeof item.peerPublicKey === 'string') &&
+    (item.queuedAt === undefined || typeof item.queuedAt === 'string');
+}
+
+function readOutbox(storageKey: string): OutboxMessage[] {
+  const stored = localStorage.getItem(storageKey);
+  if (!stored) return [];
+  const parsed: unknown = JSON.parse(stored);
+  if (!Array.isArray(parsed) || !parsed.every(isOutboxMessage)) {
+    throw new Error('The encrypted outbox contains invalid data.');
+  }
+  return parsed;
+}
+
+function writeOutbox(storageKey: string, messages: OutboxMessage[]): void {
+  localStorage.setItem(storageKey, JSON.stringify(messages));
+}
+
+function messageEventPayload(item: OutboxMessage) {
+  return {
+    conversationId: item.conversationId,
+    clientMsgId: item.clientMsgId,
+    ciphertext: item.ciphertext,
+    iv: item.iv,
+    keyVersion: item.keyVersion,
+    senderKeyVersion: item.senderKeyVersion,
+    recipientKeyVersion: item.recipientKeyVersion,
+    kind: item.kind,
+    ...(item.replyToId ? { replyToId: item.replyToId } : {}),
+  };
+}
+
+async function toPendingThreadMessage(
+  item: OutboxMessage,
+  identity: DeviceIdentity,
+  conversation: ConversationSummary,
+  userId: string,
+  isSending: boolean,
+): Promise<ThreadMessage> {
+  let plaintext = '';
+  try {
+    const cached = await getLocalMessage(item.clientMsgId);
+    plaintext = cached?.plaintext ?? await decryptMessage(
+        identity, conversation, item.ciphertext, item.iv, item.peerPublicKey,
+      );
+  } catch {
+    plaintext = 'Setting up encryption';
+  }
+  return {
+    id: item.clientMsgId,
+    conversationId: item.conversationId,
+    senderId: userId,
+    clientMsgId: item.clientMsgId,
+    seq: `pending-${item.clientMsgId}`,
+    ciphertext: item.ciphertext,
+    iv: item.iv,
+    keyVersion: item.keyVersion,
+    senderKeyVersion: item.senderKeyVersion,
+    recipientKeyVersion: item.recipientKeyVersion,
+    replyToId: item.replyToId ?? null,
+    kind: item.kind,
+    createdAt: item.queuedAt ?? new Date().toISOString(),
+    editedAt: null,
+    deletedAt: null,
+    receipts: [],
+    reactions: [],
+    plaintext,
+    decryptedReactions: [],
+    sendState: isSending ? 'sending' : 'queued',
+  };
+}
 
 function OrbitMark() {
   return <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -80,10 +169,14 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [editDraft, setEditDraft] = useState('');
   const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentity | null>(null);
   const [outboxCount, setOutboxCount] = useState(0);
+  const [outboxRevision, setOutboxRevision] = useState(0);
   const [peerRequestState, setPeerRequestState] = useState<'idle' | 'requested' | 'received' | 'accepted'>('idle');
   const [peerRequestId, setPeerRequestId] = useState<string | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const deliveredRef = useRef(new Set<string>());
+  const flushingMessagesRef = useRef(new Set<string>());
+  const attemptedMessagesRef = useRef(new Set<string>());
+  const threadLoadIdRef = useRef(0);
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -165,8 +258,45 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   const refreshThread = useCallback(async () => {
     if (!selected || !deviceIdentity) return;
+    const loadId = ++threadLoadIdRef.current;
     try {
+      const storageKey = `orbit-outbox:${user.id}`;
+      const outbox = readOutbox(storageKey);
+      setOutboxCount(outbox.length);
+      const pending = await Promise.all(outbox
+        .filter((item) => item.conversationId === selected.id)
+        .map((item) => toPendingThreadMessage(
+          item,
+          deviceIdentity,
+          selected,
+          user.id,
+          flushingMessagesRef.current.has(item.clientMsgId),
+        )));
+      if (loadId !== threadLoadIdRef.current) return;
+      setThreadMessages((current) => {
+        const existingMessages = current.filter((item) =>
+          item.conversationId === selected.id && !item.sendState,
+        );
+        const pendingIds = new Set(pending.map((item) => item.clientMsgId));
+        return [
+          ...existingMessages.filter((item) => !pendingIds.has(item.clientMsgId)),
+          ...pending,
+        ];
+      });
+
       const response = await getMessages(selected.id);
+      const persistedIds = new Set(response.messages.map((item) => item.clientMsgId));
+      const confirmedOutboxIds = outbox
+        .filter((item) => item.conversationId === selected.id && persistedIds.has(item.clientMsgId))
+        .map((item) => item.clientMsgId);
+      const remainingOutbox = outbox.filter((item) =>
+        item.conversationId !== selected.id || !persistedIds.has(item.clientMsgId),
+      );
+      if (remainingOutbox.length !== outbox.length) writeOutbox(storageKey, remainingOutbox);
+      await Promise.all(response.messages
+        .filter((item) => confirmedOutboxIds.includes(item.clientMsgId))
+        .map((item) => removeLocalMessage(item.clientMsgId)));
+      setOutboxCount(remainingOutbox.length);
       const decrypted = await Promise.all(response.messages.map(async (item): Promise<ThreadMessage> => {
         let plaintext = item.deletedAt ? 'Message deleted' : 'Unable to decrypt this message.';
         if (!item.deletedAt && item.ciphertext && item.iv && item.kind === 'text') {
@@ -185,7 +315,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         }));
         return { ...item, plaintext, decryptedReactions: decryptedReactions.filter(Boolean) };
       }));
-      setThreadMessages(decrypted);
+      if (loadId !== threadLoadIdRef.current) return;
+      setThreadMessages([
+        ...decrypted,
+        ...pending.filter((item) => !persistedIds.has(item.clientMsgId)),
+      ]);
       setThreadError('');
 
       const unread = response.messages.filter((item) =>
@@ -200,9 +334,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         void addMessageReceipt(selected.id, item.id, 'read').catch(() => undefined);
       }
     } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
+      if (loadId === threadLoadIdRef.current) {
+        setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
+      }
     }
-  }, [deviceIdentity, selected, user.id]);
+  }, [connection, deviceIdentity, selected, user.id]);
 
   useEffect(() => {
     setThreadMessages([]);
@@ -216,7 +352,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     const unsubscribe = subscribeOrbitEvents((envelope) => {
-      if (envelope.event === 'message.created') {
+      if (envelope.event === 'message.new' || envelope.event === 'message.created') {
         const event = envelope.data as { payload?: EncryptedMessage };
         if (event.payload?.conversationId === selectedId) void refreshThread();
       }
@@ -247,28 +383,97 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }, [refreshThread, selectedId]);
 
   useEffect(() => {
+    if (connection !== 'connected') attemptedMessagesRef.current.clear();
+  }, [connection]);
+
+  useEffect(() => {
     if (connection !== 'connected' || !selected) return;
     void refreshThread();
     const storageKey = `orbit-outbox:${user.id}`;
     try {
-      const queue = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as OutboxMessage[];
+      const queue = readOutbox(storageKey);
       setOutboxCount(queue.length);
-      const next = queue.filter((item) => item.conversationId === selected.id);
+      const selectedQueue = queue.filter((item) => item.conversationId === selected.id);
+      const next = selectedQueue.map((item) => ({
+        ...item,
+        senderKeyVersion: item.senderKeyVersion ?? item.keyVersion,
+        recipientKeyVersion: item.recipientKeyVersion ?? selected.peer.keyVersion,
+      }));
+      if (next.some((item, index) =>
+        item.senderKeyVersion !== selectedQueue[index].senderKeyVersion ||
+        item.recipientKeyVersion !== selectedQueue[index].recipientKeyVersion
+      )) {
+        const updates = new Map(next.map((item) => [item.clientMsgId, item]));
+        writeOutbox(storageKey, queue.map((item) => updates.get(item.clientMsgId) ?? item));
+      }
       for (const item of next) {
-        void requestOrbitEvent('message.send', item, item.clientMsgId)
+        if (
+          flushingMessagesRef.current.has(item.clientMsgId) ||
+          attemptedMessagesRef.current.has(item.clientMsgId)
+        ) continue;
+        flushingMessagesRef.current.add(item.clientMsgId);
+        attemptedMessagesRef.current.add(item.clientMsgId);
+        if (import.meta.env.DEV) {
+          console.debug('[Orbit WS] sending message.send', {
+            clientMsgId: item.clientMsgId,
+            hasConversationId: Boolean(item.conversationId),
+            hasCiphertext: Boolean(item.ciphertext),
+            hasIv: Boolean(item.iv),
+            hasSenderKeyVersion: Number.isInteger(item.senderKeyVersion),
+            hasRecipientKeyVersion: Number.isInteger(item.recipientKeyVersion),
+          });
+        }
+        void requestOrbitEvent('message.send', messageEventPayload(item), item.clientMsgId)
           .then(() => {
-            const remaining = (JSON.parse(localStorage.getItem(storageKey) ?? '[]') as OutboxMessage[])
-              .filter((entry) => entry.clientMsgId !== item.clientMsgId);
-            localStorage.setItem(storageKey, JSON.stringify(remaining));
-            setOutboxCount(remaining.length);
+            setThreadMessages((current) => current.map((message) =>
+              message.clientMsgId === item.clientMsgId
+                ? { ...message, sendState: 'sent', sendError: undefined }
+                : message,
+            ));
             void refreshThread();
           })
-          .catch((error: unknown) => setThreadError(error instanceof Error ? error.message : 'Could not send the queued message.'));
+          .catch((error: unknown) => {
+            setThreadMessages((current) => current.map((message) =>
+              message.clientMsgId === item.clientMsgId
+                ? {
+                    ...message,
+                    sendState: 'failed',
+                    sendError: error instanceof Error ? error.message : 'Could not send this message.',
+                  }
+                : message,
+            ));
+          })
+          .finally(() => flushingMessagesRef.current.delete(item.clientMsgId));
       }
     } catch {
       setThreadError('The encrypted outbox could not be read from this browser.');
     }
-  }, [connection, refreshThread, selected, user.id]);
+  }, [connection, outboxRevision, refreshThread, selected, user.id, user.keyVersion]);
+
+  function retryQueuedMessage(clientMsgId: string) {
+    attemptedMessagesRef.current.delete(clientMsgId);
+    setThreadMessages((current) => current.map((item) =>
+      item.clientMsgId === clientMsgId
+        ? { ...item, sendState: 'queued', sendError: undefined }
+        : item,
+    ));
+    setOutboxRevision((revision) => revision + 1);
+  }
+
+  function retryAllQueuedMessages() {
+    try {
+      const queue = readOutbox(`orbit-outbox:${user.id}`);
+      for (const item of queue) attemptedMessagesRef.current.delete(item.clientMsgId);
+      setThreadMessages((current) => current.map((item) =>
+        item.sendState === 'failed'
+          ? { ...item, sendState: 'queued', sendError: undefined }
+          : item,
+      ));
+      setOutboxRevision((revision) => revision + 1);
+    } catch {
+      setThreadError('The saved messages could not be read. Refresh the page and try again.');
+    }
+  }
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -288,14 +493,21 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         clientMsgId,
         ...encrypted,
         keyVersion: user.keyVersion,
+        senderKeyVersion: user.keyVersion,
+        recipientKeyVersion: selected.peer.keyVersion,
         kind: 'text',
+        peerPublicKey: selected.peer.publicKey,
+        queuedAt: new Date().toISOString(),
         ...(replyTo ? { replyToId: replyTo } : {}),
       };
+      const createdAt = new Date().toISOString();
+      await saveLocalMessage({ clientMsgId, conversationId: selected.id, plaintext, createdAt });
       const storageKey = `orbit-outbox:${user.id}`;
-      const outbox = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as OutboxMessage[];
-      outbox.push(queued);
-      localStorage.setItem(storageKey, JSON.stringify(outbox));
+      const outbox = readOutbox(storageKey);
+      if (!outbox.some((item) => item.clientMsgId === clientMsgId)) outbox.push(queued);
+      writeOutbox(storageKey, outbox);
       setOutboxCount(outbox.length);
+      setOutboxRevision((revision) => revision + 1);
       setDraft('');
       setReplyTo(null);
       setThreadMessages((current) => [...current, {
@@ -307,24 +519,19 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         ciphertext: queued.ciphertext,
         iv: queued.iv,
         keyVersion: queued.keyVersion,
-        replyToId: null,
+        replyToId: queued.replyToId ?? null,
         kind: 'text',
-        createdAt: new Date().toISOString(),
+        createdAt,
         editedAt: null,
         deletedAt: null,
+        senderKeyVersion: queued.senderKeyVersion,
+        recipientKeyVersion: queued.recipientKeyVersion,
         receipts: [],
         reactions: [],
         plaintext,
         decryptedReactions: [],
         sendState: connection === 'connected' ? 'sending' : 'queued',
       }]);
-      if (connection !== 'connected') return;
-      await requestOrbitEvent('message.send', queued, clientMsgId);
-      const remaining = (JSON.parse(localStorage.getItem(storageKey) ?? '[]') as OutboxMessage[])
-        .filter((item) => item.clientMsgId !== clientMsgId);
-      localStorage.setItem(storageKey, JSON.stringify(remaining));
-      setOutboxCount(remaining.length);
-      void refreshThread();
     } catch (error) {
       setThreadError(error instanceof Error ? error.message : 'Could not send this encrypted message.');
     } finally {
@@ -426,7 +633,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   function connectionLabel() {
     if (connection === 'connected') return 'Connected';
+    if (connection === 'connecting') return 'Connecting…';
+    if (connection === 'auth_failed') return 'Session expired';
     if (connection === 'reconnecting') return 'Reconnecting';
+    if (connection === 'idle') return 'Idle';
     return 'Offline';
   }
 
@@ -536,16 +746,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
             <span className="orbit-stage-star">✳</span>
           </div>
           <div className="orbit-thread-person">
-            <span className="eyebrow">LIVE THREAD / {selected.id.slice(0, 8).toUpperCase()}</span>
+            <span className="eyebrow">DIRECT MESSAGE</span>
             <h1>{selected.peer.displayName}<em>@{selected.peer.username}</em></h1>
             <span className={`orbit-stage-connection is-${connection}`}><i /> {connectionLabel()}</span>
           </div>
           <div className="orbit-thread-tools">
             <button className="orbit-secondary-action" type="button" onClick={() => setDialog('security')}>Verify security code</button>
-            {peerRequestState === 'idle' && <button className="orbit-primary-action" type="button" onClick={requestPeerFileShare}>Request file / media share</button>}
-            {peerRequestState === 'requested' && <span className="orbit-file-state" role="status">Sharing request sent · waiting for acceptance</span>}
-            {peerRequestState === 'received' && <div className="orbit-file-request" role="status"><span>Peer requests file / media sharing.</span><button type="button" onClick={() => respondToPeerRequest(true)}>Accept</button><button type="button" onClick={() => respondToPeerRequest(false)}>Decline</button></div>}
-            {peerRequestState === 'accepted' && <span className="orbit-file-state" role="status">Peer-to-peer file sharing accepted</span>}
           </div>
         </header>
         <section className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite">
@@ -560,8 +766,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
             </div> : <p>{item.plaintext}</p>}
             {item.decryptedReactions.length > 0 && <div className="orbit-message-reactions">{item.decryptedReactions.map((reaction, index) => <span key={`${item.id}-${index}`}>{reaction}</span>)}</div>}
             <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
-              {item.senderId === user.id && <span>{item.sendState === 'queued' ? 'Queued' : item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Read' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}</span>}
+              {item.senderId === user.id && <span>{item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}</span>}
             </footer>
+            {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
+              <span>{item.sendError ?? 'Could not send this message.'}</span>
+              <button type="button" onClick={() => retryQueuedMessage(item.clientMsgId)}>Retry</button>
+            </div>}
             {item.senderId === user.id && !item.deletedAt && !item.sendState && <div className="orbit-message-actions">
               <button type="button" onClick={() => { setEditingId(item.id); setEditDraft(item.plaintext); }}>Edit</button>
               <button type="button" onClick={() => void removeTextMessage(item)}>Delete</button>
@@ -581,7 +791,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
               event.currentTarget.form?.requestSubmit();
             }
           }} />
-          <div className="orbit-composer-bottom"><span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'Messages are end-to-end encrypted · Enter to send'}</span><button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentity}>{sending ? 'Sending…' : 'Send'} <span aria-hidden="true">↗</span></button></div>
+          <div className="orbit-composer-bottom">
+            <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'Messages are end-to-end encrypted · Enter to send'}</span>
+            {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected'} onClick={retryAllQueuedMessages}>Retry queued</button>}
+            <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentity}>{sending ? 'Sending…' : 'Send'} <span aria-hidden="true">↗</span></button>
+          </div>
         </form>
       </div>}
       {message && <p className="form-message home-message" role="alert">{message}</p>}

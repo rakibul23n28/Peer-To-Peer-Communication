@@ -42,6 +42,8 @@ export interface EncryptedMessage {
   ciphertext: string | null
   iv: string | null
   keyVersion: number
+  senderKeyVersion: number
+  recipientKeyVersion: number
   replyToId: string | null
   kind: "text" | "file"
   createdAt: string

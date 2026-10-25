@@ -120,6 +120,8 @@ model Message {
   ciphertext     Bytes?
   iv             Bytes?
   keyVersion     Int              @map("key_version")
+  senderKeyVersion Int             @map("sender_key_version")
+  recipientKeyVersion Int          @map("recipient_key_version")
   replyToId      String?          @map("reply_to_id") @db.Uuid
   kind           MessageKind
   whisperMode    WhisperMode?     @map("whisper_mode")

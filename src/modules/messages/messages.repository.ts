@@ -19,6 +19,10 @@ export interface NewMessage {
 
   keyVersion: number
 
+  senderKeyVersion: number
+
+  recipientKeyVersion: number
+
   kind: MessageKind
 
   replyToId?: string
@@ -92,7 +96,7 @@ export class MessagesRepository {
         return serializeMessage(prior)
       }
 
-      const conversation = await lockConversation(tx, conversationId, senderId)
+      await lockConversation(tx, conversationId, senderId)
 
       if (input.replyToId) {
         const reply = await tx.message.findFirst({
@@ -104,12 +108,14 @@ export class MessagesRepository {
         if (!reply) throw notFound("Reply target not found")
       }
 
-      const latest = await tx.message.findFirst({
-        where: { conversationId },
-        orderBy: { seq: "desc" },
-        select: { seq: true },
-      })
-      const seq = (latest?.seq ?? 0n) + 1n
+      const [updatedConversation] = await tx.$queryRaw<{ last_seq: bigint }[]>`
+        UPDATE conversations
+           SET last_seq = last_seq + 1
+         WHERE id = ${conversationId}::uuid
+         RETURNING last_seq
+      `
+      if (!updatedConversation) throw notFound("Conversation not found")
+      const seq = updatedConversation.last_seq
 
       const message = await tx.message.create({
         data: {
@@ -126,6 +132,10 @@ export class MessagesRepository {
           iv: prismaBytes(input.iv),
 
           keyVersion: input.keyVersion,
+
+          senderKeyVersion: input.senderKeyVersion,
+
+          recipientKeyVersion: input.recipientKeyVersion,
 
           kind: input.kind,
 
@@ -376,6 +386,10 @@ function serializeMessage(
     iv: message.iv ? Buffer.from(message.iv).toString("base64") : null,
 
     keyVersion: message.keyVersion,
+
+    senderKeyVersion: message.senderKeyVersion,
+
+    recipientKeyVersion: message.recipientKeyVersion,
 
     replyToId: message.replyToId,
 

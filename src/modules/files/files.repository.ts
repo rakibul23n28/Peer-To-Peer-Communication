@@ -72,14 +72,15 @@ export class FilesRepository {
         }
       }
 
-      const conversation = await lockConversation(tx, conversationId, senderId)
-
-      const latest = await tx.message.findFirst({
-        where: { conversationId },
-        orderBy: { seq: "desc" },
-        select: { seq: true },
-      })
-      const seq = (latest?.seq ?? 0n) + 1n
+      await lockConversation(tx, conversationId, senderId)
+      const [updatedConversation] = await tx.$queryRaw<{ last_seq: bigint }[]>`
+        UPDATE conversations
+           SET last_seq = last_seq + 1
+         WHERE id = ${conversationId}::uuid
+         RETURNING last_seq
+      `
+      if (!updatedConversation) throw notFound("Conversation not found")
+      const seq = updatedConversation.last_seq
 
       const message = await tx.message.create({
         data: {
@@ -96,6 +97,10 @@ export class FilesRepository {
           iv: prismaBytes(input.iv),
 
           keyVersion: input.keyVersion,
+
+          senderKeyVersion: input.keyVersion,
+
+          recipientKeyVersion: input.keyVersion,
 
           kind: MessageKind.file,
         },

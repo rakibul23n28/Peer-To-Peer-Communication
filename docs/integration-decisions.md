@@ -20,7 +20,7 @@
 | Conversations and messages | Membership-checked repository operations; message sequence allocation is transactionally serialized. |
 | Receipts, reactions, blocks | Persisted through dedicated repositories and authenticated controllers. |
 | File metadata | Encrypted filename/thumbnail metadata and hash persist; file bytes are never accepted by the API. Offer and chat item commit together. |
-| WebSocket | Nest gateway authenticates through the auth service and delegates persistence to services/repositories. Prisma is not called from the gateway. |
+| WebSocket | Nest gateway authenticates through the auth service and delegates persistence to services/repositories. Prisma is not called from the gateway. The handshake fix was the root cause behind the invalid Safari/Chrome response: the browser and gateway needed the same `/ws` route and a supported subprotocol (`orbit.v1`) before the auth message could be accepted, and invalid tokens now close with code `4401` so the client can refresh and reconnect instead of dropping into a silent HTTP error. |
 | Browser UI | The current signed-in screen is still account-only; chat UI has not yet been connected to the new APIs. |
 | Production verification | Not complete until deploy networking/least-privilege are configured and the Docker integration suite, verification SQL, and browser E2E matrix pass. |
 

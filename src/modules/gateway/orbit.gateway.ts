@@ -46,6 +46,10 @@ const messageSchema = z
 
     keyVersion: z.number().int().positive(),
 
+    senderKeyVersion: z.number().int().positive(),
+
+    recipientKeyVersion: z.number().int().positive(),
+
     kind: z.nativeEnum(MessageKind),
 
     replyToId: z.string().uuid().optional(),
@@ -67,6 +71,13 @@ const peerFileRequestSchema = z.object({
 
 @WebSocketGateway({ path: "/v1/ws", maxPayload: 128 * 1024 })
 export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  handleProtocols(protocols: string[] | undefined): string | false {
+    if (!protocols || protocols.length === 0) return "orbit.v1"
+    if (protocols.includes("orbit.v1")) return "orbit.v1"
+    if (protocols.some((protocol) => protocol.startsWith("orbit.token."))) return "orbit.v1"
+    return false
+  }
+
   private readonly logger = new Logger(OrbitGateway.name)
 
   @WebSocketServer()
@@ -117,20 +128,25 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     @MessageBody() body: unknown,
   ) {
-    const input = z
-      .object({ accessToken: z.string().min(20).max(8192) })
-      .strict()
-      .parse(body)
+    try {
+      const input = z
+        .object({ accessToken: z.string().min(20).max(8192) })
+        .strict()
+        .parse(body)
 
-    const userId = await this.auth.verifyAccessToken(input.accessToken)
+      const userId = await this.auth.verifyAccessToken(input.accessToken)
 
-    this.users.set(client, userId)
+      this.users.set(client, userId)
 
-    const timer = this.authTimers.get(client)
+      const timer = this.authTimers.get(client)
 
-    if (timer) clearTimeout(timer)
+      if (timer) clearTimeout(timer)
 
-    return { type: "auth.ok", id: randomUUID(), ts: Date.now(), payload: {} }
+      return { type: "auth.ok", id: randomUUID(), ts: Date.now(), payload: {} }
+    } catch (error) {
+      client.close(4401, "token expired")
+      throw error
+    }
   }
 
   @SubscribeMessage("message.send")
@@ -150,7 +166,7 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
       })
 
       await this.broadcastToConversation(input.conversationId, userId, {
-        type: "message.created",
+        type: "message.new",
         id: randomUUID(),
         ts: Date.now(),
         payload: message,
@@ -167,7 +183,10 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return {
         type: "message.error",
         id: clientMsgId,
-        payload: { message: this.safeErrorMessage(error) },
+        payload: {
+          code: this.safeErrorCode(error),
+          message: this.safeErrorMessage(error),
+        },
       }
     }
   }
@@ -479,5 +498,17 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     if (error instanceof z.ZodError) return "The request was invalid. Check the message and retry."
     return "Orbit could not save this message. Check the connection and retry."
+  }
+
+  private safeErrorCode(error: unknown): string {
+    if (error instanceof z.ZodError) return "INVALID_MESSAGE"
+    if (error instanceof HttpException) {
+      const response = error.getResponse()
+      if (typeof response === "object" && response !== null && "code" in response) {
+        return String(response.code)
+      }
+      return "MESSAGE_REJECTED"
+    }
+    return "MESSAGE_SEND_FAILED"
   }
 }

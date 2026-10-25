@@ -74,6 +74,10 @@ export class MessagesService {
 
     keyVersion: number
 
+    senderKeyVersion: number
+
+    recipientKeyVersion: number
+
     kind: MessageKind
 
     replyToId?: string

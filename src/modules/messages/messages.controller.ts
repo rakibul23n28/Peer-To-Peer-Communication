@@ -34,6 +34,10 @@ const createMessageSchema = z
 
     keyVersion: z.number().int().positive(),
 
+    senderKeyVersion: z.number().int().positive().optional(),
+
+    recipientKeyVersion: z.number().int().positive().optional(),
+
     kind: z.nativeEnum(MessageKind),
 
     replyToId: z.string().uuid().optional(),
@@ -112,6 +116,10 @@ export class MessagesController {
       ciphertext: decodeBase64(input.ciphertext, 1, 65_536, "Ciphertext"),
 
       iv: decodeBase64(input.iv, 1, 32, "IV"),
+
+      senderKeyVersion: input.senderKeyVersion ?? input.keyVersion,
+
+      recipientKeyVersion: input.recipientKeyVersion ?? input.keyVersion,
     })
   }
 

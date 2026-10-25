@@ -18,11 +18,15 @@ function encodeBase64(value: ArrayBuffer): string {
   return btoa(binary);
 }
 
-async function conversationKey(identity: DeviceIdentity, conversation: ConversationSummary): Promise<CryptoKey> {
-  if (!conversation.peer.publicKey) throw new Error('This contact does not have an active public key.');
+async function conversationKey(
+  identity: DeviceIdentity,
+  conversation: ConversationSummary,
+  peerPublicKeyBase64 = conversation.peer.publicKey,
+): Promise<CryptoKey> {
+  if (!peerPublicKeyBase64) throw new Error('This contact does not have an active public key.');
   const peerPublicKey = await crypto.subtle.importKey(
     'spki',
-    decodeBase64(conversation.peer.publicKey),
+    decodeBase64(peerPublicKeyBase64),
     { name: 'ECDH', namedCurve: 'P-256' },
     false,
     [],
@@ -68,8 +72,9 @@ export async function decryptMessage(
   conversation: ConversationSummary,
   ciphertext: string,
   iv: string,
+  peerPublicKeyBase64?: string,
 ): Promise<string> {
-  const key = await conversationKey(identity, conversation);
+  const key = await conversationKey(identity, conversation, peerPublicKeyBase64);
   const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: decodeBase64(iv) },
     key,

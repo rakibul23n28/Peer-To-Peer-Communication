@@ -2540,6 +2540,18 @@
   font-size: 8px;
 }
 
+.orbit-outbox-retry {
+  color: var(--orbit-cyan);
+  font-size: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.orbit-outbox-retry:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .orbit-composer-bottom .orbit-primary-action {
   min-height: 34px;
 }

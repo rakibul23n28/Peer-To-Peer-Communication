@@ -26,6 +26,9 @@ import {
 import { decryptMessage, encryptMessage } from './messageCrypto';
 import { getDeviceIdentity, type DeviceIdentity } from './keyStore';
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
+import { ConversationSidebar } from './components/ConversationSidebar';
+import { EmptyConversationState } from './components/EmptyConversationState';
+import { initials } from './components/OrbitMark';
 
 interface AuthenticatedHomeProps {
   user: UserIdentity;
@@ -34,7 +37,7 @@ interface AuthenticatedHomeProps {
   message: string;
 }
 
-type Dialog = 'search' | 'security' | 'settings' | null;
+type Dialog = 'search' | 'settings' | null;
 type ThreadMessage = EncryptedMessage & { plaintext: string; decryptedReactions: string[]; sendState?: 'queued' | 'sending' | 'sent' | 'failed'; sendError?: string };
 type OutboxMessage = {
   conversationId: string;
@@ -134,21 +137,12 @@ async function toPendingThreadMessage(
   };
 }
 
-function OrbitMark() {
-  return <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-    <circle cx="24" cy="24" r="4" fill="currentColor" />
-    <ellipse cx="24" cy="24" rx="18" ry="8" transform="rotate(-34 24 24)" stroke="currentColor" strokeWidth="1.5" />
-    <circle cx="38.5" cy="14" r="2.5" fill="currentColor" />
-  </svg>;
-}
-
-function initials(name: string): string {
-  return name.trim().slice(0, 1).toLocaleUpperCase() || '?';
-}
-
 export default function AuthenticatedHome({ user, onSignOut, busy, message }: AuthenticatedHomeProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [conversationPreviews, setConversationPreviews] = useState<Record<string, string>>({});
   const [conversationError, setConversationError] = useState('');
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [connection, setConnection] = useState<OrbitConnectionState>('offline');
@@ -172,7 +166,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [outboxRevision, setOutboxRevision] = useState(0);
   const [peerRequestState, setPeerRequestState] = useState<'idle' | 'requested' | 'received' | 'accepted'>('idle');
   const [peerRequestId, setPeerRequestId] = useState<string | null>(null);
+  const [fileShortcutPending, setFileShortcutPending] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState('');
   const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const filePickerRef = useRef<HTMLInputElement | null>(null);
   const deliveredRef = useRef(new Set<string>());
   const flushingMessagesRef = useRef(new Set<string>());
   const attemptedMessagesRef = useRef(new Set<string>());
@@ -184,13 +181,91 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     try {
       const response = await getConversations();
       setConversations(response.conversations);
-      setSelectedId((current) => current && response.conversations.some(({ id }) => id === current) ? current : null);
+      setSelectedId((current) => {
+        const available = response.conversations.some(({ id }) => id === current);
+        if (window.matchMedia('(max-width: 680px)').matches) return null;
+        if (current && available) return current;
+        let remembered: string | null = null;
+        try {
+          remembered = localStorage.getItem(`orbit-last-conversation:${user.id}`);
+        } catch {
+          remembered = null;
+        }
+        return response.conversations.find(({ id }) => id === remembered)?.id
+          ?? response.conversations[0]?.id
+          ?? null;
+      });
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Could not load conversations.');
     } finally {
       setLoadingConversations(false);
     }
-  }, []);
+  }, [user.id]);
+
+  useEffect(() => {
+    if (!deviceIdentity) return;
+    let active = true;
+    void Promise.all(conversations.map(async (conversation) => {
+      const message = conversation.lastMessage;
+      if (!message) return [conversation.id, 'No messages yet'] as const;
+      if (message.kind === 'file') return [conversation.id, 'File shared'] as const;
+      try {
+        const preview = await decryptMessage(
+          deviceIdentity,
+          conversation,
+          message.ciphertext,
+          message.iv,
+        );
+        return [conversation.id, preview] as const;
+      } catch {
+        return [conversation.id, 'Unable to decrypt this message'] as const;
+      }
+    })).then((entries) => {
+      if (active) setConversationPreviews(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [conversations, deviceIdentity]);
+
+  function selectConversation(conversationId: string) {
+    setSelectedId(conversationId);
+    setConversations((current) => current.map((item) =>
+      item.id === conversationId ? { ...item, unreadCount: 0 } : item,
+    ));
+  }
+
+  useEffect(() => {
+    if (!selectedId) return;
+    try {
+      localStorage.setItem(`orbit-last-conversation:${user.id}`, selectedId);
+    } catch {
+      setNotice('Conversation opened. This browser could not remember it for next time.');
+    }
+  }, [selectedId, user.id]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 680px)');
+    const updateSelectionForViewport = () => {
+      if (media.matches) {
+        setSelectedId(null);
+        return;
+      }
+      const availableConversations = conversationsRef.current;
+      setSelectedId((current) => {
+        if (current && availableConversations.some(({ id }) => id === current)) return current;
+        let remembered: string | null = null;
+        try {
+          remembered = localStorage.getItem(`orbit-last-conversation:${user.id}`);
+        } catch {
+          remembered = null;
+        }
+        return availableConversations.find(({ id }) => id === remembered)?.id ?? availableConversations[0]?.id ?? null;
+      });
+    };
+    media.addEventListener('change', updateSelectionForViewport);
+    return () => media.removeEventListener('change', updateSelectionForViewport);
+  }, [user.id]);
 
   useEffect(() => {
     void loadConversations();
@@ -623,9 +698,13 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     try {
       const { conversation } = await createConversation(person.id);
       await loadConversations();
-      setSelectedId(conversation.id);
+      selectConversation(conversation.id);
       setDialog(null);
       setQuery('');
+      if (fileShortcutPending) {
+        setFileShortcutPending(false);
+        window.requestAnimationFrame(() => filePickerRef.current?.click());
+      }
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : 'Could not start this conversation.');
     }
@@ -640,102 +719,35 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     return 'Offline';
   }
 
-  return <main className="home-screen orbit-shell">
-    <aside className="orbit-sidebar" aria-label="Orbit navigation">
-      <a className="home-brand" href="/" aria-label="Orbit home"><OrbitMark /> orbit<span>.</span></a>
-      <div className="orbit-sidebar-heading">
-        <span className="eyebrow">01 / YOUR ORBIT</span>
-        <button className="orbit-add" type="button" aria-label="Find someone by username" onClick={() => setDialog('search')}>+</button>
-      </div>
-      <button className="orbit-find" type="button" onClick={() => setDialog('search')}>
-        <span aria-hidden="true">⌕</span> Find someone by username
-      </button>
-      <div className="orbit-list-heading"><span>CONVERSATIONS</span><span>{conversations.length.toString().padStart(2, '0')}</span></div>
-      <div className="orbit-conversation-list">
-        {loadingConversations && <p className="orbit-list-note">Loading conversations…</p>}
-        {!loadingConversations && conversations.length === 0 && <p className="orbit-list-note">No conversations yet. Find someone to begin.</p>}
-        {conversationError && <div className="orbit-inline-error" role="alert"><span>{conversationError}</span><button type="button" onClick={() => void loadConversations()}>Retry</button></div>}
-        {conversations.map(({ id, peer }) => <button
-          className={`orbit-conversation${selectedId === id ? ' is-selected' : ''}`}
-          type="button"
-          key={id}
-          aria-label={`Conversation with ${peer.displayName}`}
-          onClick={() => setSelectedId(id)}
-          aria-current={selectedId === id ? 'page' : undefined}
-        >
-          <span className="orbit-avatar">{initials(peer.displayName)}</span>
-          <span className="orbit-conversation-copy"><strong>{peer.displayName}</strong><small>@{peer.username}</small></span>
-          <span className="orbit-chevron" aria-hidden="true">↗</span>
-        </button>)}
-      </div>
-      <div className="orbit-sidebar-bottom">
-        <div className={`orbit-connection is-${connection}`} role="status">
-          <i />
-          <span>{connectionLabel()}</span>
-          {connection === 'offline' && <button type="button" onClick={retryOrbitSocket}>Retry</button>}
-        </div>
-        {connectionError && <p className="orbit-connection-error" role="alert">{connectionError}</p>}
-        <button className="orbit-profile" type="button" aria-label={`Settings for ${user.displayName}`} onClick={() => setDialog('settings')}>
-          <span className="orbit-avatar orbit-avatar--self">{initials(user.displayName)}</span>
-          <span><strong>{user.displayName}</strong><small>@{user.username}</small></span>
-          <span className="orbit-chevron" aria-hidden="true">···</span>
-        </button>
-      </div>
-    </aside>
+  return <main className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}`}>
+    <ConversationSidebar
+      user={user}
+      busy={busy}
+      conversations={conversations}
+      selectedId={selectedId}
+      previews={conversationPreviews}
+      loading={loadingConversations}
+      error={conversationError}
+      connection={connection}
+      connectionError={connectionError}
+      onSelect={selectConversation}
+      onRetryConversations={() => void loadConversations()}
+      onRetryConnection={retryOrbitSocket}
+      onFindSomeone={() => setDialog('search')}
+      onSendFile={() => { setFileShortcutPending(true); setQuery(''); setDialog('search'); }}
+      onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
+      onOpenSettings={() => setDialog('settings')}
+      onSignOut={onSignOut}
+    />
 
-    <section className="orbit-main" aria-label={selected ? `Conversation with ${selected.peer.displayName}` : 'Personal space'}>
-      <header className="orbit-topbar">
-        <span className="orbit-topbar-caption"><i /> PRIVATE SESSION</span>
-        <button className="home-signout" disabled={busy} onClick={onSignOut}>Sign out <span aria-hidden="true">↗</span></button>
-      </header>
+    <section className="orbit-main" aria-label={selected ? `Conversation with ${selected.peer.displayName}` : 'No conversations'}>
+      {selected && <header className="orbit-topbar">
+        <button className="orbit-back-to-list" type="button" onClick={() => setSelectedId(null)}>← Conversations</button>
+      </header>}
 
-      {!selected ? <div className="orbit-home">
-        <div className="orbit-home-copy">
-          <span className="eyebrow"><span /> YOUR ORBIT / PERSONAL SPACE</span>
-          <h1>A little space,<br /><em>entirely yours.</em></h1>
-          <p>A quieter place for your people. Start with a username; your conversations will gather here.</p>
-          <div className="orbit-home-actions">
-            <button className="orbit-primary-action" type="button" onClick={() => setDialog('search')}>Find someone by username <span aria-hidden="true">↗</span></button>
-            <button className="orbit-secondary-action" type="button" onClick={() => setDialog('security')}>Verify security code</button>
-            <button className="orbit-secondary-action" type="button" onClick={() => setDialog('settings')}>Settings</button>
-          </div>
-        </div>
-        <div className="orbit-home-art" aria-hidden="true">
-          <span className="orbit-art-ring orbit-art-ring--one" />
-          <span className="orbit-art-ring orbit-art-ring--two" />
-          <span className="orbit-art-ring orbit-art-ring--three" />
-          <span className="orbit-art-point orbit-art-point--one" />
-          <span className="orbit-art-point orbit-art-point--two" />
-          <span className="orbit-art-core"><OrbitMark /></span>
-        </div>
-        <div className="orbit-home-bottom">
-          <article className="orbit-info-card">
-            <span className="eyebrow">02 / YOUR DEVICE</span>
-            <div className="orbit-device-row">
-              <span className="orbit-avatar orbit-avatar--self">{initials(user.displayName)}</span>
-              <div><strong>{user.displayName}</strong><small>@{user.username}</small></div>
-              <button className="orbit-copy-button" type="button" onClick={() => void copyFingerprint(user.fingerprint)}>Copy fingerprint</button>
-            </div>
-            <details className="orbit-fingerprint">
-              <summary>Device key fingerprint</summary>
-              <code>{user.fingerprint}</code>
-              <button type="button" onClick={() => void copyFingerprint(user.fingerprint)}>Copy full fingerprint</button>
-            </details>
-          </article>
-          <article className="orbit-info-card orbit-security-card">
-            <span className="eyebrow">03 / DEVICE SECURITY</span>
-            <h2>This device is<br />in your orbit.</h2>
-            <p>Your private key stays on this device. The active server key matches this device.</p>
-            <div className="orbit-security-state"><span><i /> KEY VERIFIED</span><span>VERSION {user.keyVersion}</span></div>
-          </article>
-          <article className="orbit-info-card orbit-status-card">
-            <span className="eyebrow">04 / LIVE CONNECTION</span>
-            <strong className={`orbit-status-title is-${connection}`}><i /> {connectionLabel()}</strong>
-            <p>{connectionError || (connection === 'connected' ? 'Secure connection to Orbit is active.' : 'Orbit is trying to reach the secure messaging service.')}</p>
-            {connection === 'offline' && <button className="orbit-inline-retry" type="button" onClick={retryOrbitSocket}>Retry connection ↗</button>}
-          </article>
-        </div>
-      </div> : <div className="orbit-thread">
+      {!selected && conversations.length === 0 && !loadingConversations && <EmptyConversationState onFindSomeone={() => setDialog('search')} />}
+
+      {selected && <div className="orbit-thread">
         <header className="orbit-thread-header">
           <div className="orbit-thread-orbit" aria-hidden="true">
             <span className="orbit-art-ring orbit-art-ring--one" />
@@ -748,10 +760,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           <div className="orbit-thread-person">
             <span className="eyebrow">DIRECT MESSAGE</span>
             <h1>{selected.peer.displayName}<em>@{selected.peer.username}</em></h1>
-            <span className={`orbit-stage-connection is-${connection}`}><i /> {connectionLabel()}</span>
-          </div>
-          <div className="orbit-thread-tools">
-            <button className="orbit-secondary-action" type="button" onClick={() => setDialog('security')}>Verify security code</button>
           </div>
         </header>
         <section className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite">
@@ -784,6 +792,17 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           <div ref={threadEndRef} />
         </section>
         <form className="orbit-composer" onSubmit={(event) => void sendTextMessage(event)}>
+          <input ref={filePickerRef} className="orbit-file-picker" type="file" accept="image/*,video/*" aria-label="Choose a photo or video" onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (!file) return;
+            setSelectedFileName(file.name);
+            setNotice('File selected, but file transfers are not available yet. Nothing was sent.');
+            event.currentTarget.value = '';
+          }} />
+          {selectedFileName && <div className="orbit-file-selection" role="status">
+            <span>{selectedFileName}</span>
+            <button type="button" aria-label="Clear selected file" onClick={() => setSelectedFileName('')}>×</button>
+          </div>}
           {replyTo && <div className="orbit-replying">Replying to {threadMessages.find((item) => item.id === replyTo)?.plaintext.slice(0, 80) ?? 'message'}<button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
           <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={8000} aria-label="Message" placeholder={deviceIdentity ? 'Write an encrypted message…' : 'Loading your device key…'} disabled={!deviceIdentity} onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -800,7 +819,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       </div>}
       {message && <p className="form-message home-message" role="alert">{message}</p>}
       {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
-      <footer className="home-footer"><span>ORBIT / PRIVATE BY DESIGN</span><span>YOUR KEYS. YOUR SPACE.</span></footer>
     </section>
 
     {notice && <div className="orbit-toast" role="status">{notice}</div>}
@@ -814,7 +832,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         <button className="orbit-dialog-close" type="button" onClick={() => setDialog(null)} aria-label="Close dialog">×</button>
         {dialog === 'search' && <>
           <span className="eyebrow">FIND YOUR PEOPLE / 01</span>
-          <h2 id="orbit-dialog-title">Find someone.</h2>
+          <h2 id="orbit-dialog-title">{fileShortcutPending ? 'Who would you like to send a file to?' : 'Find someone.'}</h2>
           <p>Search by username. Enter at least three characters.</p>
           <label className="orbit-search-label" htmlFor="orbit-user-search">Username</label>
           <input id="orbit-user-search" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Start typing a username" autoComplete="off" />
@@ -823,21 +841,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
               <span className="orbit-avatar">{initials(person.displayName)}</span><span><strong>{person.displayName}</strong><small>@{person.username}</small></span><span aria-hidden="true">↗</span>
             </button>)}
           </div>}
-        </>}
-        {dialog === 'security' && <>
-          <span className="eyebrow">SECURITY / MANUAL COMPARISON</span>
-          <h2 id="orbit-dialog-title">Verify a security code.</h2>
-          {selected ? <>
-            <p>Compare this contact’s fingerprint with them through a trusted channel. Orbit does not mark a contact verified without that comparison.</p>
-            <span className="orbit-code-label">@{selected.peer.username} / ACTIVE KEY VERSION {selected.peer.keyVersion}</span>
-            <code className="orbit-security-code">{selected.peer.fingerprint || 'No active fingerprint is available.'}</code>
-            {selected.peer.fingerprint && <button className="orbit-primary-action" type="button" onClick={() => void copyFingerprint(selected.peer.fingerprint)}>Copy security code <span aria-hidden="true">↗</span></button>}
-          </> : <><p>Select a conversation to compare the other person’s active public-key fingerprint.</p>{conversations.length === 0 ? <p className="orbit-dialog-hint">No conversations to verify yet.</p> : <div className="orbit-search-results">
-            {conversations.map(({ id, peer }) => <button type="button" key={id} onClick={() => {
-              setSelectedId(id);
-              setDialog('security');
-            }}><span className="orbit-avatar">{initials(peer.displayName)}</span><span><strong>{peer.displayName}</strong><small>@{peer.username}</small></span><span aria-hidden="true">↗</span></button>)}
-          </div>}</>}
         </>}
         {dialog === 'settings' && <>
           <span className="eyebrow">SETTINGS / DEVICE</span>

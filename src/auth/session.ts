@@ -25,6 +25,18 @@ export interface UserIdentity {
 export interface ConversationSummary {
   id: string
   peer: UserIdentity
+  unreadCount: number
+  lastMessage: {
+    id: string
+    senderId: string | null
+    clientMsgId: string | null
+    seq: string
+    ciphertext: string
+    iv: string
+    keyVersion: number | null
+    kind: string | null
+    createdAt: string | null
+  } | null
 }
 
 export interface UserSearchResult {

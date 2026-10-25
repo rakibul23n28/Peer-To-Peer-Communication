@@ -1172,8 +1172,16 @@
 }
 
 .orbit-sidebar-heading {
+  position: relative;
   padding: 0 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+.orbit-list-title {
+  color: #c8d7df;
+  font-family: Manrope, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .orbit-shell .eyebrow {
@@ -1306,7 +1314,15 @@
   display: grid;
   min-width: 0;
   flex: 1;
-  gap: 4px;
+  gap: 5px;
+}
+
+.orbit-conversation-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
 }
 
 .orbit-conversation-copy strong,
@@ -1321,13 +1337,117 @@
 
 .orbit-conversation-copy small,
 .orbit-profile small {
+  overflow: hidden;
   color: #8fa2b1;
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orbit-conversation-title time {
+  flex: 0 0 auto;
+  color: #8296a5;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.orbit-unread-count {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 99px;
+  background: #56e3e01c;
+  color: var(--orbit-cyan);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .orbit-chevron {
   color: #7790a2;
   font-size: 13px;
+}
+
+.orbit-more {
+  color: #9bb0bf;
+  font-size: 18px;
+  letter-spacing: .06em;
+}
+
+.orbit-add-wrap {
+  position: relative;
+}
+
+.orbit-popover,
+.orbit-account-menu {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  min-width: 190px;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid #344b60;
+  border-radius: 11px;
+  background: #101c2a;
+  box-shadow: 0 14px 36px #0008;
+}
+
+.orbit-popover {
+  top: calc(100% + 7px);
+  right: 0;
+}
+
+.orbit-account-menu {
+  right: 13px;
+  bottom: 78px;
+}
+
+.orbit-popover button,
+.orbit-account-menu button {
+  min-height: 35px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: #d8e6ed;
+  text-align: left;
+  font-size: 10px;
+}
+
+.orbit-popover button:hover,
+.orbit-account-menu button:hover:not(:disabled) {
+  background: #56e3e012;
+  color: var(--orbit-cyan);
+}
+
+.orbit-account-version {
+  padding: 8px 9px 6px;
+  border-bottom: 1px solid #ffffff16;
+  color: #a9bcc8;
+  font-size: 9px;
+}
+
+.orbit-account-fingerprint {
+  max-width: 220px;
+  padding: 6px 9px;
+  overflow-wrap: anywhere;
+  color: #d5e4eb;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.orbit-account-menu button:last-child {
+  color: #ffad96;
+}
+
+.orbit-popover button:focus-visible,
+.orbit-account-menu button:focus-visible,
+.orbit-add:focus-visible,
+.orbit-profile:focus-visible,
+.orbit-conversation:focus-visible {
+  outline: 2px solid var(--orbit-cyan);
+  outline-offset: 2px;
 }
 
 .orbit-sidebar-bottom {
@@ -1343,6 +1463,24 @@
   padding: 0 7px;
   color: #a4b6c0;
   font-size: 10px;
+}
+
+.orbit-connection-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.orbit-connection-label.is-visible {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
 }
 
 .orbit-connection i,
@@ -1449,6 +1587,91 @@
 .orbit-main > .orbit-topbar {
   flex: 0 0 auto;
   margin: 0 calc(clamp(24px, 5vw, 72px) * -1);
+}
+
+.orbit-back-to-list {
+  display: none;
+  color: #b8c8d2;
+  font-size: 10px;
+}
+
+.orbit-back-to-list:hover {
+  color: var(--orbit-cyan);
+}
+
+.orbit-empty-state {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 17px;
+  padding: 24px;
+  text-align: center;
+}
+
+.orbit-empty-orbit {
+  position: relative;
+  display: grid;
+  width: 112px;
+  height: 72px;
+  place-items: center;
+}
+
+.orbit-empty-orbit .orbit-art-ring {
+  width: 100%;
+  height: 58%;
+  border-color: #9eb7cb42;
+}
+
+.orbit-empty-orbit .orbit-art-ring--two {
+  width: 112%;
+  height: 68%;
+  border-color: #a89bff4a;
+}
+
+.orbit-empty-orbit .orbit-art-core {
+  width: 43px;
+  box-shadow: 0 0 34px #56e3e020;
+}
+
+.orbit-empty-orbit .orbit-art-core svg {
+  width: 30px;
+  height: 30px;
+}
+
+.orbit-empty-state > p {
+  margin: 0;
+  color: #e5eff3;
+  font-family: Manrope, sans-serif;
+  font-size: 17px;
+  font-weight: 550;
+  letter-spacing: -.025em;
+}
+
+.orbit-empty-state .orbit-primary-action {
+  margin-top: 3px;
+}
+
+.orbit-file-picker {
+  display: none;
+}
+
+.orbit-file-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid #344b60;
+  border-radius: 9px;
+  color: #c8d8e0;
+  font-size: 10px;
+}
+
+.orbit-file-selection button {
+  color: var(--orbit-cyan);
+  font-size: 16px;
 }
 
 .orbit-home {
@@ -2589,5 +2812,110 @@
 
   .orbit-message {
     max-width: 92%;
+  }
+}
+
+@media (max-width: 680px) {
+  .orbit-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .orbit-shell.has-conversations:not(.has-selected-conversation) .orbit-main,
+  .orbit-shell.has-selected-conversation .orbit-sidebar,
+  .orbit-shell:not(.has-conversations) .orbit-sidebar {
+    display: none;
+  }
+
+  .orbit-shell.has-selected-conversation .orbit-main,
+  .orbit-shell:not(.has-conversations) .orbit-main {
+    display: flex;
+  }
+
+  .orbit-sidebar {
+    width: 100%;
+    min-height: 0;
+    padding: 16px 14px 0;
+    border-right: 0;
+  }
+
+  .orbit-sidebar .home-brand {
+    justify-content: flex-start;
+    margin: 0 7px 20px;
+    font-size: 16px;
+  }
+
+  .orbit-sidebar .home-brand svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .orbit-sidebar .home-brand > span,
+  .orbit-sidebar-heading .orbit-list-title,
+  .orbit-conversation-copy,
+  .orbit-sidebar-bottom .orbit-connection-label.is-visible,
+  .orbit-sidebar-bottom .orbit-connection button,
+  .orbit-sidebar-bottom .orbit-connection-label,
+  .orbit-connection-error,
+  .orbit-profile > span:nth-child(2),
+  .orbit-profile > .orbit-more {
+    display: initial;
+  }
+
+  .orbit-sidebar-heading {
+    justify-content: space-between;
+    padding: 0 7px;
+    margin-bottom: 12px;
+  }
+
+  .orbit-conversation-list {
+    width: 100%;
+  }
+
+  .orbit-conversation,
+  .orbit-profile {
+    justify-content: flex-start;
+    padding: 9px;
+  }
+
+  .orbit-conversation {
+    min-height: 59px;
+  }
+
+  .orbit-profile {
+    min-height: 55px;
+  }
+
+  .orbit-sidebar-bottom {
+    position: relative;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .orbit-connection {
+    justify-content: flex-start;
+    min-height: 28px;
+    padding: 0 7px;
+  }
+
+  .orbit-empty-state {
+    min-height: 0;
+    padding: 22px 16px;
+  }
+
+  .orbit-main {
+    padding: 0 17px;
+  }
+
+  .orbit-main > .orbit-topbar {
+    margin: 0 -17px;
+    padding: 0 17px;
+  }
+
+  .orbit-back-to-list {
+    display: inline-flex;
+  }
+
+  .orbit-thread {
+    min-height: 0;
+    padding-top: 8px;
   }
 }

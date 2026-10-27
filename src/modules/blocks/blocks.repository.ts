@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
@@ -42,3 +42,5 @@ export class BlocksRepository {
     await this.prisma.block.deleteMany({ where: { blockerId, blockedId } })
   }
 }
+
+Inject(PrismaService)(BlocksRepository, undefined, 0)

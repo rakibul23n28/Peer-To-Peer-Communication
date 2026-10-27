@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { ConversationsRepository } from "./conversations.repository.js"
 
@@ -20,3 +20,5 @@ export class ConversationsService {
     return this.repository.memberIds(conversationId, userId)
   }
 }
+
+Inject(ConversationsRepository)(ConversationsService, undefined, 0)

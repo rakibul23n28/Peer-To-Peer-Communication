@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { AuthService } from "../auth/auth.service.js"
 
@@ -38,3 +38,6 @@ export class UsersService {
     return this.auth.deleteAccount(userId)
   }
 }
+
+Inject(UsersRepository)(UsersService, undefined, 0)
+Inject(AuthService)(UsersService, undefined, 1)

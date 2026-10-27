@@ -6,7 +6,7 @@ import {
   randomUUID,
 } from "node:crypto"
 
-import { HttpException, Injectable } from "@nestjs/common"
+import { HttpException, Inject, Injectable } from "@nestjs/common"
 
 import argon2 from "argon2"
 
@@ -456,6 +456,8 @@ export function requireOrbitClient(request: {
     )
   }
 }
+
+Inject(AuthRepository)(AuthService, undefined, 0)
 
 function validatePublicKey(encoded: string): Buffer {
   const publicKey = Buffer.from(encoded, "base64")

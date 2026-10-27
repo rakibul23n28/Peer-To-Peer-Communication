@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import type { RefreshToken } from "@prisma/client"
 
@@ -302,3 +302,5 @@ export class AuthRepository {
     })
   }
 }
+
+Inject(PrismaService)(AuthRepository, undefined, 0)

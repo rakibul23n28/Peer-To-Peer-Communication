@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { FileTransferStatus, MessageKind } from "@prisma/client"
 
@@ -227,3 +227,5 @@ export class FilesRepository {
     })
   }
 }
+
+Inject(PrismaService)(FilesRepository, undefined, 0)

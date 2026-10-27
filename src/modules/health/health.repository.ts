@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
@@ -10,3 +10,5 @@ export class HealthRepository {
     await this.prisma.$queryRaw`SELECT 1`
   }
 }
+
+Inject(PrismaService)(HealthRepository, undefined, 0)

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { FileTransferStatus } from "@prisma/client"
 
@@ -21,3 +21,5 @@ export class FilesService {
     return this.repository.updateStatus(conversationId, fileId, userId, status)
   }
 }
+
+Inject(FilesRepository)(FilesService, undefined, 0)

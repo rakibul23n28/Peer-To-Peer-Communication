@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common"
+import { Inject, Injectable } from "@nestjs/common"
 
 import { badRequest } from "../shared/http-error.filter.js"
 
@@ -25,3 +25,5 @@ export class BlocksService {
     return this.repository.remove(userId, blockedId)
   }
 }
+
+Inject(BlocksRepository)(BlocksService, undefined, 0)

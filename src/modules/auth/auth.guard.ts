@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common"
+import {
+  CanActivate,
+  ExecutionContext,
+  Inject,
+  Injectable,
+} from "@nestjs/common"
 
 import type { Request } from "express"
 
@@ -28,3 +33,5 @@ export class AuthGuard implements CanActivate {
     return true
   }
 }
+
+Inject(AuthService)(AuthGuard, undefined, 0)

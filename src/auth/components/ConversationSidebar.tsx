@@ -68,8 +68,8 @@ export function ConversationSidebar({
       <div className="orbit-add-wrap">
         <button className="orbit-add" type="button" aria-label="New conversation or send a file" aria-haspopup="true" aria-expanded={addMenuOpen} aria-controls="orbit-add-menu" onClick={() => setAddMenuOpen((open) => !open)}><OrbitIcon name="plus" size={17} /></button>
         {addMenuOpen && <div className="orbit-popover" id="orbit-add-menu">
-          <button type="button" onClick={() => { onFindSomeone(); setAddMenuOpen(false); }}>Find someone by username</button>
-          <button type="button" onClick={() => { onSendFile(); setAddMenuOpen(false); }}>Send a file</button>
+          <button type="button" onClick={() => { onFindSomeone(); setAddMenuOpen(false); }}><OrbitIcon name="search" size={15} />Find someone by username</button>
+          <button type="button" onClick={() => { onSendFile(); setAddMenuOpen(false); }}><OrbitIcon name="paperclip" size={15} />Send a file</button>
         </div>}
       </div>
     </div>
@@ -105,11 +105,11 @@ export function ConversationSidebar({
         <span className="orbit-more" aria-hidden="true">···</span>
       </button>
       {accountMenuOpen && <div className="orbit-account-menu" id="orbit-account-menu" aria-label="Account">
-        <span className="orbit-account-version">Device key · version {user.keyVersion}</span>
+        <span className="orbit-account-version"><OrbitIcon name="shield" size={14} />Device key · version {user.keyVersion}</span>
         <code className="orbit-account-fingerprint">{user.fingerprint}</code>
-        <button type="button" onClick={onCopyFingerprint}>Copy device fingerprint</button>
-        <button type="button" onClick={() => { onOpenSettings(); setAccountMenuOpen(false); }}>Settings</button>
-        <button type="button" disabled={busy} onClick={onSignOut}>Sign out</button>
+        <button type="button" onClick={onCopyFingerprint}><OrbitIcon name="copy" size={15} />Copy device fingerprint</button>
+        <button type="button" onClick={() => { onOpenSettings(); setAccountMenuOpen(false); }}><OrbitIcon name="settings" size={15} />Settings</button>
+        <button type="button" disabled={busy} onClick={onSignOut}><OrbitIcon name="logout" size={15} />Sign out</button>
       </div>}
     </div>
   </aside>;

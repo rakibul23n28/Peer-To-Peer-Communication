@@ -193,13 +193,13 @@ export function ConversationThread({
               </div>}
               <div className="orbit-file-card-footer">
                 <span>{item.file.status === 'offered' ? 'Waiting for acceptance' : item.file.status === 'accepted' ? 'Accepted · waiting for peer' : item.file.status === 'transferring' ? 'Transferring directly' : item.file.status === 'received' ? 'Received and verified' : item.file.status}</span>
-                {receivedFiles[item.file.fileId] && <a href={receivedFiles[item.file.fileId].url} download={receivedFiles[item.file.fileId].name}>Download</a>}
+                {receivedFiles[item.file.fileId] && <a href={receivedFiles[item.file.fileId].url} download={receivedFiles[item.file.fileId].name} aria-label={`Download ${receivedFiles[item.file.fileId].name}`} title="Download file"><OrbitIcon name="download" /></a>}
                 {item.senderId !== user.id && item.file.status === 'offered' && <>
-                  <button type="button" onClick={() => onAcceptFile(item)}>Accept</button>
-                  <button type="button" onClick={() => onDeclineFile(item)}>Decline</button>
+                  <button type="button" onClick={() => onAcceptFile(item)} aria-label="Accept file" title="Accept file"><OrbitIcon name="check" /></button>
+                  <button type="button" onClick={() => onDeclineFile(item)} aria-label="Decline file" title="Decline file"><OrbitIcon name="close" /></button>
                 </>}
-                {item.file.status === 'offered' && item.senderId === user.id && <button type="button" onClick={() => onCancelFile(item)}>Cancel offer</button>}
-                {(item.file.status === 'accepted' || item.file.status === 'transferring') && <button type="button" onClick={() => onCancelFile(item)}>Cancel transfer</button>}
+                {item.file.status === 'offered' && item.senderId === user.id && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file offer" title="Cancel offer"><OrbitIcon name="close" /></button>}
+                {(item.file.status === 'accepted' || item.file.status === 'transferring') && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file transfer" title="Cancel transfer"><OrbitIcon name="close" /></button>}
               </div>
               <p className="orbit-file-privacy">File bytes travel through an encrypted peer-to-peer connection; Orbit stores only the encrypted offer and transfer metadata.</p>
             </div> : editingId === item.id ? <div className="orbit-edit-form">
@@ -209,19 +209,29 @@ export function ConversationThread({
             </div> : <p>{item.plaintext}</p>}
             {item.decryptedReactions.length > 0 && <div className="orbit-message-reactions">{item.decryptedReactions.map((reaction, index) => <span key={`${item.id}-${index}`}>{reaction}</span>)}</div>}
             <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
-              {item.senderId === user.id && <span>{item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}</span>}
+              {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
+                {item.sendState === 'failed'
+                  ? <><OrbitIcon name="close" size={13} /><span className="orbit-visually-hidden">Could not send</span></>
+                  : item.sendState === 'queued' || item.sendState === 'sending'
+                    ? <><span className="orbit-sending-indicator" /><span className="orbit-visually-hidden">Sending</span></>
+                    : item.receipts.some((entry) => entry.status === 'read')
+                      ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Seen</span></>
+                      : item.receipts.some((entry) => entry.status === 'delivered')
+                        ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Delivered</span></>
+                        : <><OrbitIcon name="check" size={14} /><span className="orbit-visually-hidden">Sent</span></>}
+              </span>}
             </footer>
             {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
               <span>{item.sendError ?? 'Could not send this message.'}</span>
-              <button type="button" onClick={() => onRetryQueuedMessage(item.clientMsgId)}>Retry</button>
+              <button type="button" onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
             </div>}
-            {item.senderId === user.id && !item.deletedAt && !item.sendState && <div className="orbit-message-actions">
-              <button type="button" onClick={() => onStartEdit(item)}>Edit</button>
-              <button type="button" onClick={() => onDeleteTextMessage(item)}>Delete</button>
-            </div>}
-            {!item.deletedAt && <div className="orbit-message-actions">
-              <button type="button" onClick={() => onReply(item.id)}>Reply</button>
-              <button type="button" aria-label="React with heart" onClick={() => onReact(item, '❤️')}>React ♥</button>
+            {!item.deletedAt && <div className="orbit-message-actions" aria-label="Message actions">
+              {item.senderId === user.id && !item.sendState && <>
+                <button type="button" title="Edit message" aria-label="Edit message" onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
+                <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
+              </>}
+              <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
+              <button type="button" title="React with heart" aria-label="React with heart" onClick={() => onReact(item, '❤️')}><OrbitIcon name="heart" size={14} /></button>
             </div>}
           </article>
         </div>;

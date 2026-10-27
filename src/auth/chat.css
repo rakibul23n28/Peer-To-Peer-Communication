@@ -1,33 +1,58 @@
 .orbit-shell {
-  --orbit-bg: #071018;
-  --orbit-panel: #0c1822;
-  --orbit-panel-raised: #12222e;
-  --orbit-border: #233844;
-  --orbit-text: #e7f2ef;
-  --orbit-muted: #8da49f;
-  --orbit-cyan: #7ce5d2;
-  --orbit-coral: #ffa982;
-  --orbit-violet: #b6a4ff;
+  --orbit-bg: #111113;
+  --orbit-panel: #19191d;
+  --orbit-panel-raised: #202025;
+  --orbit-border: #34343b;
+  --orbit-text: #f0eef2;
+  --orbit-muted: #aaa5ad;
+  --orbit-cyan: #f2b66d;
+  --orbit-coral: #f08e78;
+  --orbit-violet: #c5a5ec;
+  position: relative;
+  isolation: isolate;
   background:
-    radial-gradient(ellipse at 74% -14%, #23504e80 0, transparent 38%),
-    radial-gradient(ellipse at 45% 120%, #30265055 0, transparent 45%),
+    radial-gradient(ellipse at 78% -18%, #70452245 0, transparent 38%),
+    radial-gradient(ellipse at 38% 118%, #563d6133 0, transparent 43%),
     var(--orbit-bg);
 }
 
 .orbit-shell::before {
   background-image:
-    linear-gradient(#ffffff04 1px, transparent 1px),
-    linear-gradient(90deg, #ffffff04 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: radial-gradient(ellipse at 74% 44%, #000 0, transparent 72%);
-  opacity: .42;
+    radial-gradient(circle, #f8cc8c35 1px, transparent 1.5px),
+    radial-gradient(circle, #ffffff0a 1px, transparent 1.5px);
+  background-position: 0 0, 19px 21px;
+  background-size: 38px 38px, 76px 76px;
+  mask-image: radial-gradient(ellipse at 75% 47%, #000 0, transparent 69%);
+  opacity: .26;
+}
+
+.orbit-shell::after {
+  position: absolute;
+  z-index: 0;
+  top: 16%;
+  right: 12%;
+  width: clamp(180px, 24vw, 350px);
+  aspect-ratio: 1;
+  border: 1px solid #ffc47517;
+  border-radius: 42% 58% 64% 36% / 43% 38% 62% 57%;
+  background:
+    radial-gradient(ellipse at 35% 35%, #f3b86b14, transparent 68%),
+    radial-gradient(ellipse at 68% 70%, #bc91dd0c, transparent 70%);
+  box-shadow: inset 0 0 64px #f4bc6b08, 0 0 80px #ecaa6508;
+  content: '';
+  pointer-events: none;
+  animation: orbit-shape-drift 28s ease-in-out infinite alternate;
+}
+
+.orbit-shell .orbit-main {
+  z-index: 1;
 }
 
 .orbit-sidebar {
   z-index: 2;
   padding: 27px 19px 15px;
   border-right-color: #ffffff10;
-  background: linear-gradient(180deg, #0d1a23ed, #0a141deb);
+  background: linear-gradient(180deg, #1a191ced, #121215eb);
   box-shadow: 16px 0 42px #00000014;
 }
 
@@ -36,10 +61,10 @@
 }
 
 .orbit-add {
-  border-color: #7ce5d248;
+  border-color: #f2b66d48;
   border-radius: 12px;
-  background: #7ce5d20c;
-  box-shadow: 0 0 24px #7ce5d20a;
+  background: #f2b66d0c;
+  box-shadow: 0 0 24px #f2b66d0a;
 }
 
 .orbit-conversation-list,
@@ -63,13 +88,13 @@
 .orbit-message-list::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 99px;
-  background: linear-gradient(180deg, #7ce5d2, #a899ff) padding-box;
+  background: linear-gradient(180deg, #f2b66d, #c5a5ec) padding-box;
   background-clip: padding-box;
 }
 
 .orbit-conversation-list::-webkit-scrollbar-thumb:hover,
 .orbit-message-list::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #a5f2df, #c0b5ff) padding-box;
+  background: linear-gradient(180deg, #ffd394, #d4b8f4) padding-box;
 }
 
 .orbit-conversation {
@@ -85,15 +110,57 @@
 }
 
 .orbit-conversation.is-selected {
-  border-color: #7ce5d229;
-  background: linear-gradient(110deg, #7ce5d219, #b6a4ff12);
+  border-color: #f2b66d29;
+  background: linear-gradient(110deg, #f2b66d19, #c5a5ec12);
   box-shadow: inset 3px 0 var(--orbit-cyan), 0 10px 24px #00000020;
 }
 
 .orbit-avatar {
   border-radius: 15px;
-  background: linear-gradient(145deg, #b6a4ff35, #7ce5d225);
+  background: linear-gradient(145deg, #c5a5ec35, #f2b66d25);
   box-shadow: inset 0 1px #ffffff18;
+}
+
+.orbit-account-menu,
+.orbit-popover {
+  border-color: #3a3532;
+  background: #1b1a1d;
+  box-shadow: 0 16px 42px #0009;
+}
+
+.orbit-popover button,
+.orbit-account-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  border-radius: 9px;
+}
+
+.orbit-popover button svg,
+.orbit-account-menu button svg {
+  flex: 0 0 auto;
+  color: #efb56f;
+}
+
+.orbit-account-version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom-color: #ffffff14;
+}
+
+.orbit-account-version svg {
+  color: #efb56f;
+}
+
+.orbit-account-fingerprint {
+  border-radius: 7px;
+  background: #ffffff06;
+}
+
+.orbit-account-menu button:last-child svg {
+  color: #f08e78;
 }
 
 .orbit-main {
@@ -131,8 +198,8 @@
 }
 
 .orbit-thread-back:hover {
-  border-color: #7ce5d255;
-  background: #7ce5d20d;
+  border-color: #f2b66d55;
+  background: #f2b66d0d;
   color: var(--orbit-cyan);
 }
 
@@ -164,7 +231,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #ffbd99;
+  color: #f3a38b;
 }
 
 .orbit-connection-pill i {
@@ -176,7 +243,7 @@
 }
 
 .orbit-connection-pill.is-connected {
-  color: #7ce5d2;
+  color: #f2b66d;
 }
 
 .orbit-thread-actions {
@@ -209,9 +276,9 @@
 .orbit-file-card-footer button:hover,
 .orbit-file-card-footer a:hover,
 .orbit-attach-action:hover:not(:disabled) {
-  border-color: #7ce5d25e;
-  background: #7ce5d212;
-  color: #a7f3e3;
+  border-color: #f2b66d5e;
+  background: #f2b66d12;
+  color: #ffd394;
 }
 
 .orbit-thread-actions button:disabled,
@@ -286,9 +353,9 @@
 }
 
 .orbit-message.is-own {
-  border-color: #6bc8b743;
+  border-color: #d29d6043;
   border-radius: 17px 17px 5px 17px;
-  background: linear-gradient(140deg, #173a3bf5, #12282ff5 78%);
+  background: linear-gradient(140deg, #393024f5, #272126f5 78%);
   box-shadow: 0 10px 28px #00000020, inset 0 1px #b5fff20d;
 }
 
@@ -303,7 +370,7 @@
 
 .orbit-message.is-own::after {
   right: -4px;
-  border-right: 1px solid #6bc8b743;
+  border-right: 1px solid #d29d6043;
   transform: rotate(30deg);
 }
 
@@ -323,17 +390,91 @@
   font-size: 9px;
 }
 
+.orbit-message-status {
+  display: inline-flex;
+  align-items: center;
+  color: #f1bd76;
+}
+
+.orbit-message-status:has(.orbit-visually-hidden) {
+  gap: 4px;
+}
+
+.orbit-sending-indicator {
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: orbit-status-spin .8s linear infinite;
+}
+
+.orbit-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 .orbit-message-actions {
-  gap: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid #ffffff0b;
+  opacity: .76;
+  transition: opacity .16s ease;
+}
+
+.orbit-message:hover .orbit-message-actions,
+.orbit-message:focus-within .orbit-message-actions {
+  opacity: 1;
 }
 
 .orbit-message-actions button {
-  color: #95b2ac;
-  font-size: 9px;
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #b7aba0;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
 }
 
-.orbit-message-actions button:hover {
-  color: var(--orbit-cyan);
+.orbit-message-actions button:hover,
+.orbit-message-actions button:focus-visible {
+  border-color: #efb56f38;
+  background: #efb56f12;
+  color: #ffd394;
+}
+
+.orbit-message-actions button.is-destructive:hover,
+.orbit-message-actions button.is-destructive:focus-visible {
+  border-color: #f08e7840;
+  background: #f08e7812;
+  color: #ff9f87;
+}
+
+.orbit-file-card-footer button,
+.orbit-file-card-footer a {
+  min-width: 34px;
+  padding: 0 9px;
+}
+
+.orbit-message-error button {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #f2b66d38;
+  border-radius: 9px;
+  color: #ffd394;
 }
 
 .orbit-thread-empty {
@@ -344,7 +485,7 @@
   padding: 34px;
   border: 1px solid #ffffff10;
   border-radius: 26px;
-  background: radial-gradient(ellipse at 50% 0, #7ce5d20b, transparent 70%);
+  background: radial-gradient(ellipse at 50% 0, #f2b66d0b, transparent 70%);
 }
 
 .orbit-empty-glyph {
@@ -353,11 +494,11 @@
   height: 48px;
   margin-bottom: 14px;
   place-items: center;
-  border: 1px solid #7ce5d234;
+  border: 1px solid #f2b66d34;
   border-radius: 17px;
-  background: #7ce5d20c;
+  background: #f2b66d0c;
   color: var(--orbit-cyan);
-  box-shadow: 0 0 34px #7ce5d210;
+  box-shadow: 0 0 34px #f2b66d10;
 }
 
 .orbit-thread-empty p {
@@ -372,9 +513,9 @@
 .orbit-file-card-heading > span {
   width: 38px;
   height: 38px;
-  border-color: #7ce5d234;
+  border-color: #f2b66d34;
   border-radius: 13px;
-  background: #7ce5d20d;
+  background: #f2b66d0d;
   color: var(--orbit-cyan);
 }
 
@@ -394,8 +535,8 @@
 }
 
 .orbit-composer:focus-within {
-  border-color: #7ce5d255;
-  box-shadow: 0 17px 55px #0000003b, 0 0 0 3px #7ce5d20b, inset 0 1px #ffffff0c;
+  border-color: #f2b66d55;
+  box-shadow: 0 17px 55px #0000003b, 0 0 0 3px #f2b66d0b, inset 0 1px #ffffff0c;
 }
 
 .orbit-composer > textarea {
@@ -428,10 +569,10 @@
   gap: 8px;
   padding: 0 14px;
   border-radius: 12px;
-  background: linear-gradient(120deg, #92f0da, #74d8ca);
-  color: #09201e;
+  background: linear-gradient(120deg, #ffd394, #e8ad61);
+  color: #271a0d;
   font-weight: 700;
-  box-shadow: 0 5px 18px #65d8c330;
+  box-shadow: 0 5px 18px #d3914330;
 }
 
 .orbit-composer-bottom .orbit-primary-action:hover:not(:disabled) {
@@ -451,7 +592,7 @@
   padding: 4px 8px;
   border-left-color: var(--orbit-cyan);
   border-radius: 0 8px 8px 0;
-  background: #7ce5d208;
+  background: #f2b66d08;
 }
 
 .orbit-replying button {
@@ -474,7 +615,7 @@
 }
 
 .orbit-search-input-wrap:focus-within {
-  border-color: #7ce5d278;
+  border-color: #f2b66d78;
 }
 
 .orbit-search-input-wrap input {
@@ -489,7 +630,7 @@
 .orbit-shell button:focus-visible,
 .orbit-shell a:focus-visible,
 .orbit-shell textarea:focus-visible {
-  outline: 2px solid #8cebd9;
+  outline: 2px solid #ffd394;
   outline-offset: 3px;
 }
 
@@ -608,4 +749,18 @@
   .orbit-composer-bottom .orbit-primary-action {
     transition: none;
   }
+
+  .orbit-shell::after {
+    animation: none;
+  }
+}
+
+@keyframes orbit-shape-drift {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  50% { transform: translate3d(-18px, 16px, 0) rotate(8deg) scale(1.04); }
+  100% { transform: translate3d(14px, -12px, 0) rotate(-5deg) scale(.98); }
+}
+
+@keyframes orbit-status-spin {
+  to { transform: rotate(360deg); }
 }

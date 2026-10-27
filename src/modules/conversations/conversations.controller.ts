@@ -18,21 +18,16 @@ const createConversationSchema = z
   .object({ peerId: z.string().uuid() })
   .strict()
 
-@Controller("v1/conversations")
-@UseGuards(AuthGuard)
 export class ConversationsController {
   constructor(
-    @Inject(ConversationsService)
     private readonly conversations: ConversationsService,
   ) {}
 
-  @Get()
-  list(@Req() request: AuthRequest) {
+  list(request: AuthRequest) {
     return this.conversations.list(request.userId)
   }
 
-  @Post()
-  create(@Req() request: AuthRequest, @Body() body: unknown) {
+  create(request: AuthRequest, body: unknown) {
     return this.conversations.create(
       request.userId,
 
@@ -40,3 +35,24 @@ export class ConversationsController {
     )
   }
 }
+
+// Apply Nest's legacy decorators explicitly so this file also compiles when
+// TypeScript's legacy decorator syntax is disabled.
+const conversationsPrototype = ConversationsController.prototype
+const listDescriptor = Object.getOwnPropertyDescriptor(
+  conversationsPrototype,
+  "list",
+)!
+const createDescriptor = Object.getOwnPropertyDescriptor(
+  conversationsPrototype,
+  "create",
+)!
+
+Controller("v1/conversations")(ConversationsController)
+UseGuards(AuthGuard)(ConversationsController)
+Inject(ConversationsService)(ConversationsController, undefined, 0)
+Get()(conversationsPrototype, "list", listDescriptor)
+Req()(conversationsPrototype, "list", 0)
+Post()(conversationsPrototype, "create", createDescriptor)
+Req()(conversationsPrototype, "create", 0)
+Body()(conversationsPrototype, "create", 1)

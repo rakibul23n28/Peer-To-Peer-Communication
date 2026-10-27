@@ -15,27 +15,35 @@ import { AuthGuard, type AuthRequest } from "../auth/auth.guard.js"
 
 import { BlocksService } from "./blocks.service.js"
 
-@Controller("v1/users/me/blocks")
-@UseGuards(AuthGuard)
 export class BlocksController {
-  constructor(@Inject(BlocksService) private readonly blocks: BlocksService) {}
+  constructor(private readonly blocks: BlocksService) {}
 
-  @Get()
-  async list(@Req() request: AuthRequest) {
+  async list(request: AuthRequest) {
     return { blocks: await this.blocks.list(request.userId) }
   }
 
-  @Put(":userId")
-  async add(@Req() request: AuthRequest, @Param("userId") userId: string) {
+  async add(request: AuthRequest, userId: string) {
     await this.blocks.add(request.userId, z.string().uuid().parse(userId))
 
     return { ok: true as const }
   }
 
-  @Delete(":userId")
-  async remove(@Req() request: AuthRequest, @Param("userId") userId: string) {
+  async remove(request: AuthRequest, userId: string) {
     await this.blocks.remove(request.userId, z.string().uuid().parse(userId))
 
     return { ok: true as const }
   }
 }
+
+const prototype = BlocksController.prototype
+Controller("v1/users/me/blocks")(BlocksController)
+UseGuards(AuthGuard)(BlocksController)
+Inject(BlocksService)(BlocksController, undefined, 0)
+Get()(prototype, "list", Object.getOwnPropertyDescriptor(prototype, "list")!)
+Req()(prototype, "list", 0)
+Put(":userId")(prototype, "add", Object.getOwnPropertyDescriptor(prototype, "add")!)
+Req()(prototype, "add", 0)
+Param("userId")(prototype, "add", 1)
+Delete(":userId")(prototype, "remove", Object.getOwnPropertyDescriptor(prototype, "remove")!)
+Req()(prototype, "remove", 0)
+Param("userId")(prototype, "remove", 1)

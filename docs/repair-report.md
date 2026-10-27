@@ -11,7 +11,7 @@
 
 - The client retains sender plaintext only in the local Dexie cache, sends ciphertext plus key versions, shows specific failed-send messages with Retry, and flushes queued messages when connected. The server persists by sender/client-message ID for deduplication and allocates a sequence in the same transaction as the message insert.
 - The current browser opened at the sign-in page, so no authenticated two-user send/receive, database ciphertext inspection, or one-second delivery check was possible.
-- `npm run typecheck` passes. The focused WebSocket test command passes (5 tests across the configured test files).
+- `npm run typecheck` passes.
 - File transfer is not end-to-end implemented: the application has metadata offer and peer-request signaling, but no `RTCPeerConnection`, RTC signaling relay, encrypted chunk transport, preview, or save flow. The picker does not send file contents.
 
 ## Required next action

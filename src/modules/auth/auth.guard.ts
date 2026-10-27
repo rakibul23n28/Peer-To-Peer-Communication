@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Inject, Injectable } from "@nestjs/common"
+import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common"
 
 import type { Request } from "express"
 
@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>()

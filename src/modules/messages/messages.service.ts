@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { MessageKind, ReceiptStatus, WhisperMode } from "@prisma/client"
 
@@ -7,7 +7,6 @@ import { MessagesRepository, type NewMessage } from "./messages.repository.js"
 @Injectable()
 export class MessagesService {
   constructor(
-    @Inject(MessagesRepository)
     private readonly repository: MessagesRepository,
   ) {}
 

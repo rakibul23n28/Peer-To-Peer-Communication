@@ -1,10 +1,15 @@
-import { existsSync } from "node:fs"
-import { resolve } from "node:path"
 import { z } from "zod"
 
-const envPath = resolve(process.cwd(), ".env")
-if (existsSync(envPath)) {
-  process.loadEnvFile(envPath)
+declare const process: {
+  cwd(): string
+  env: Record<string, string | undefined>
+  loadEnvFile(path?: string): void
+}
+
+try {
+  process.loadEnvFile(`${process.cwd()}/.env`)
+} catch (error) {
+  if ((error as { code?: string }).code !== "ENOENT") throw error
 }
 
 export const envSchema = z

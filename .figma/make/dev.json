@@ -7,7 +7,7 @@
   // Each key accepts a shorthand array of globs:
   //   "installOn": ["package.json"]
   // or an object with includes/excludes:
-  //   "installOn": { "includes": ["**/*.json"], "excludes": ["test/**"] }
+  //   "installOn": { "includes": ["**/*.json"], "excludes": ["generated/**"] }
   //
   // Only list files that affect the *toolchain or dependency tree* here —
   // NOT application source files. Vite's dev server already watches

@@ -6,23 +6,24 @@
 2. Set `DATABASE_URL` to the PostgreSQL runtime connection value. If it points to a pooler, also configure `DIRECT_URL` to the provider's direct TLS endpoint for migrations.
 3. Set unique random `JWT_SECRET` and `COOKIE_SECRET` values. Do not reuse or share database credentials.
 4. Keep database values in the server environment only. Do not prefix them with `VITE_`, expose them through browser configuration, or commit `.env`.
+5. During local development, run `npm run dev:server` in a separate terminal alongside Vite. Vite proxies `/api` (rewritten to `/v1`), direct `/v1` requests, and WebSocket traffic to the Nest server at `API_PORT` (default `3000`).
 
 ## Schema changes
 
 - Edit `prisma/schema.prisma` and create migrations with `npm run db:migrate:dev` against a development database.
 - Deploy reviewed migrations with `npm run db:migrate:deploy`.
-- Do not run migration reset commands against a hosted or production database. The integration runner resets only the isolated Docker database defined in `docker-compose.test.yml`.
+- Do not run migration reset commands against a hosted or production database.
 - For the pre-Prisma Orbit schema, back up and verify the target first, then run `npm run db:migrate:baseline:legacy` followed by `npm run db:migrate:deploy`. The baseline command records migration history only; the forward-only `20261025170000_legacy_schema_transition` migration performs the schema transition. Do not run this baseline command against an empty or different database.
 - The transition preserves active rows, initializes `last_seq` from existing messages, normalizes deleted usernames to the 32-character limit, and removes content attached to tombstones. It disables row-level security and removes policies on the nine application tables. Review these changes and the target before deploying.
+- The transition rebuilds the legacy offered-transfer expiry index with the new enum type before converting `file_transfers.status`, so its predicate remains valid after the type change.
 - Raw SQL checks Prisma cannot express belong in the generated migration SQL. Do not create manual runtime DDL.
 
-## Tests and database verification
+## Database verification
 
-- `npm test` runs fast unit tests.
-- `npm run test:integration` starts a throwaway PostgreSQL container, runs `prisma migrate reset`, executes the repository integration suite, then runs `scripts/verify-db.sql` and removes only that test container/volume.
+- Run `npm run db:verify` to execute the read-only database verification queries in `scripts/verify-db.sql`.
 - A successful `GET /v1/healthz` confirms the HTTP process is responding. `GET /v1/readyz` also checks database connectivity.
 - The reverse proxy must forward WebSocket upgrades on the configured API base path ending in `/ws` to the server's `/v1/ws` gateway. The Vite development proxy enables WebSocket upgrades on `/api` and rewrites `/api/ws` to `/v1/ws`.
-- Production deployment requires private network access, TLS, a least-privilege database role, zero seeded rows, and passing integration plus browser E2E verification.
+- Production deployment requires private network access, TLS, a least-privilege database role, and zero seeded rows.
 - Use a least-privilege runtime database identity for NestJS; reserve DDL privileges for the controlled migration connection.
 
 ## Data handling

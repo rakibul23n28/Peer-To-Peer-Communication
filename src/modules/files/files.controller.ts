@@ -61,18 +61,15 @@ const statusSchema = z
   .object({ status: z.nativeEnum(FileTransferStatus) })
   .strict()
 
-@Controller("v1/conversations/:conversationId/files")
-@UseGuards(AuthGuard)
 export class FilesController {
-  constructor(@Inject(FilesService) private readonly files: FilesService) {}
+  constructor(private readonly files: FilesService) {}
 
-  @Post("offer")
   offer(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Body() body: unknown,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -113,15 +110,14 @@ export class FilesController {
     })
   }
 
-  @Patch(":fileId")
   updateStatus(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Param("fileId") fileId: string,
+    fileId: string,
 
-    @Body() body: unknown,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -138,3 +134,26 @@ export class FilesController {
     )
   }
 }
+
+const filesController = FilesController.prototype
+
+Inject(FilesService)(FilesController, undefined, 0)
+Req()(filesController, "offer", 0)
+Param("conversationId")(filesController, "offer", 1)
+Body()(filesController, "offer", 2)
+Post("offer")(
+  filesController,
+  "offer",
+  Object.getOwnPropertyDescriptor(filesController, "offer")!,
+)
+Req()(filesController, "updateStatus", 0)
+Param("conversationId")(filesController, "updateStatus", 1)
+Param("fileId")(filesController, "updateStatus", 2)
+Body()(filesController, "updateStatus", 3)
+Patch(":fileId")(
+  filesController,
+  "updateStatus",
+  Object.getOwnPropertyDescriptor(filesController, "updateStatus")!,
+)
+UseGuards(AuthGuard)(FilesController)
+Controller("v1/conversations/:conversationId/files")(FilesController)

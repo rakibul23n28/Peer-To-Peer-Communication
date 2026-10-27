@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
@@ -6,20 +6,20 @@ import { notFound } from "../shared/http-error.filter.js"
 
 @Injectable()
 export class BlocksRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  list(blockerId: string) {
-    return this.prisma.block
-      .findMany({
-        where: { blockerId },
+  async list(blockerId: string) {
+    const rows = await this.prisma.block.findMany({
+      where: { blockerId },
 
-        select: {
-          blocked: { select: { id: true, username: true, displayName: true } },
-        },
+      select: {
+        blocked: { select: { id: true, username: true, displayName: true } },
+      },
 
-        orderBy: { createdAt: "desc" },
-      })
-      .then((rows) => rows.map(({ blocked }) => blocked))
+      orderBy: { createdAt: "desc" },
+    })
+
+    return rows.map(({ blocked }) => blocked)
   }
 
   async add(blockerId: string, blockedId: string): Promise<void> {

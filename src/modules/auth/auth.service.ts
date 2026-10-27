@@ -6,7 +6,7 @@ import {
   randomUUID,
 } from "node:crypto"
 
-import { HttpException, Inject, Injectable } from "@nestjs/common"
+import { HttpException, Injectable } from "@nestjs/common"
 
 import argon2 from "argon2"
 
@@ -72,7 +72,7 @@ export interface AuthenticatedIdentity {
 @Injectable()
 export class AuthService {
   constructor(
-    @Inject(AuthRepository) private readonly repository: AuthRepository,
+    private readonly repository: AuthRepository,
   ) {}
 
   async register(

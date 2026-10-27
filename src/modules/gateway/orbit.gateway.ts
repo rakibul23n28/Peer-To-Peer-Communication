@@ -69,7 +69,6 @@ const peerFileRequestSchema = z.object({
   requestId: z.string().uuid(),
 }).strict()
 
-@WebSocketGateway({ path: "/v1/ws", maxPayload: 128 * 1024 })
 export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleProtocols(protocols: string[] | undefined): string | false {
     if (!protocols || protocols.length === 0) return "orbit.v1"
@@ -80,7 +79,6 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(OrbitGateway.name)
 
-  @WebSocketServer()
   private server!: WsServer
 
   private readonly users = new WeakMap<WebSocket, string>()
@@ -96,16 +94,12 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }>()
 
   constructor(
-    @Inject(AuthService)
     private readonly auth: AuthService,
 
-    @Inject(ConversationsService)
     private readonly conversations: ConversationsService,
 
-    @Inject(MessagesService)
     private readonly messages: MessagesService,
 
-    @Inject(FilesService)
     private readonly files: FilesService,
   ) {}
 
@@ -122,11 +116,10 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (timer) clearTimeout(timer)
   }
 
-  @SubscribeMessage("auth")
   async authenticate(
-    @ConnectedSocket() client: WebSocket,
+    client: WebSocket,
 
-    @MessageBody() body: unknown,
+    body: unknown,
   ) {
     try {
       const input = z
@@ -149,10 +142,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage("message.send")
   async sendMessage(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     let clientMsgId = "unknown"
     try {
@@ -191,10 +183,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage("message.edit")
   async editMessage(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const requestSchema = z.object({
       conversationId: z.string().uuid(),
@@ -226,10 +217,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage("receipt.add")
   async addReceipt(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const userId = await this.authenticatedUser(client)
 
@@ -264,10 +254,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return result
   }
 
-  @SubscribeMessage("file.offer")
   async offerFile(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const userId = await this.authenticatedUser(client)
 
@@ -353,10 +342,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return file
   }
 
-  @SubscribeMessage("file.status")
   async updateFile(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const userId = await this.authenticatedUser(client)
 
@@ -391,10 +379,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return result
   }
 
-  @SubscribeMessage("file.peer.request")
   async requestPeerFileShare(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const userId = await this.authenticatedUser(client)
     const input = peerFileRequestSchema.parse(body)
@@ -415,10 +402,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { type: "file.peer.request.ack", id: input.requestId, payload: { delivered: true } }
   }
 
-  @SubscribeMessage("file.peer.response")
   async respondToPeerFileShare(
-    @ConnectedSocket() client: WebSocket,
-    @MessageBody() body: unknown,
+    client: WebSocket,
+    body: unknown,
   ) {
     const userId = await this.authenticatedUser(client)
     const input = z.object({
@@ -512,3 +498,46 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return "MESSAGE_SEND_FAILED"
   }
 }
+
+type LegacyClassDecorator = (target: Function) => void
+type LegacyMethodDecorator = (
+  target: object,
+  propertyKey: string | symbol,
+  descriptor: PropertyDescriptor,
+) => void
+type LegacyParameterDecorator = (
+  target: object,
+  propertyKey: string | symbol | undefined,
+  parameterIndex: number,
+) => void
+type LegacyPropertyDecorator = (target: object, propertyKey: string | symbol) => void
+
+const gatewayTarget = OrbitGateway as unknown as Function
+const gatewayPrototype = OrbitGateway.prototype
+
+;(WebSocketGateway({ path: "/v1/ws", maxPayload: 128 * 1024 }) as unknown as LegacyClassDecorator)(gatewayTarget)
+;(WebSocketServer() as unknown as LegacyPropertyDecorator)(gatewayPrototype, "server")
+
+const constructorTarget = OrbitGateway as unknown as object
+;(Inject(AuthService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 0)
+;(Inject(ConversationsService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 1)
+;(Inject(MessagesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 2)
+;(Inject(FilesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 3)
+
+const registerHandler = (event: string, method: keyof OrbitGateway): void => {
+  const descriptor = Object.getOwnPropertyDescriptor(gatewayPrototype, method)
+  if (!descriptor) return
+
+  ;(SubscribeMessage(event) as unknown as LegacyMethodDecorator)(gatewayPrototype, method, descriptor)
+  ;(ConnectedSocket() as unknown as LegacyParameterDecorator)(gatewayPrototype, method, 0)
+  ;(MessageBody() as unknown as LegacyParameterDecorator)(gatewayPrototype, method, 1)
+}
+
+registerHandler("auth", "authenticate")
+registerHandler("message.send", "sendMessage")
+registerHandler("message.edit", "editMessage")
+registerHandler("receipt.add", "addReceipt")
+registerHandler("file.offer", "offerFile")
+registerHandler("file.status", "updateFile")
+registerHandler("file.peer.request", "requestPeerFileShare")
+registerHandler("file.peer.response", "respondToPeerFileShare")

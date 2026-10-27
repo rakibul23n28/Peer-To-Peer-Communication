@@ -33,6 +33,7 @@ export class PrismaService
       ) {
         this.logger.error(`Database connection error code: ${error.code}`)
       }
+      throw error
     }
   }
 

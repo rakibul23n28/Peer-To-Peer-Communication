@@ -54,6 +54,7 @@ ALTER TABLE "messages" DROP CONSTRAINT IF EXISTS "messages_kind_check";
 ALTER TABLE "messages" DROP CONSTRAINT IF EXISTS "messages_whisper_mode_check";
 ALTER TABLE "message_receipts" DROP CONSTRAINT IF EXISTS "message_receipts_status_check";
 ALTER TABLE "file_transfers" DROP CONSTRAINT IF EXISTS "file_transfers_status_check";
+DROP INDEX IF EXISTS "file_transfers_expiry_idx";
 
 DO $$
 BEGIN
@@ -105,6 +106,10 @@ BEGIN
   END IF;
 END
 $$;
+
+CREATE INDEX IF NOT EXISTS "file_transfers_expiry_idx"
+  ON "file_transfers"("updated_at")
+  WHERE "status" = 'offered'::"file_transfer_status";
 
 UPDATE "users"
    SET "username" = 'deleted-' || substr(md5("id"::text), 1, 24)

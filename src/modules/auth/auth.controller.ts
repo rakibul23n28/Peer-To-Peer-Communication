@@ -52,17 +52,12 @@ const loginSchema = z
 
 @Controller("v1/auth")
 export class AuthController {
-  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService) {}
 
-  @Post("register")
-
-  @HttpCode(HttpStatus.CREATED)
   async register(
-    @Body() body: unknown,
-
-    @Req() request: Request,
-
-    @Res({ passthrough: true }) response: Response,
+    body: unknown,
+    request: Request,
+    response: Response,
   ) {
     const result = await this.auth.register(
       registerSchema.parse(body),
@@ -75,13 +70,10 @@ export class AuthController {
     return { accessToken: result.accessToken, user: result.user }
   }
 
-  @Post("login")
   async login(
-    @Body() body: unknown,
-
-    @Req() request: Request,
-
-    @Res({ passthrough: true }) response: Response,
+    body: unknown,
+    request: Request,
+    response: Response,
   ) {
     const result = await this.auth.login(
       loginSchema.parse(body),
@@ -93,15 +85,10 @@ export class AuthController {
     return { accessToken: result.accessToken, user: result.user }
   }
 
-  @Post("refresh")
-
-  @HttpCode(HttpStatus.OK)
   async refresh(
-    @Req() request: Request,
-
-    @Headers("x-orbit-client") client: string | undefined,
-
-    @Res({ passthrough: true }) response: Response,
+    request: Request,
+    client: string | undefined,
+    response: Response,
   ) {
     requireOrbitClient({ headers: { "x-orbit-client": client } })
 
@@ -115,15 +102,10 @@ export class AuthController {
     return { accessToken: result.accessToken }
   }
 
-  @Post("logout")
-
-  @HttpCode(HttpStatus.OK)
   async logout(
-    @Req() request: Request,
-
-    @Headers("x-orbit-client") client: string | undefined,
-
-    @Res({ passthrough: true }) response: Response,
+    request: Request,
+    client: string | undefined,
+    response: Response,
   ) {
     requireOrbitClient({ headers: { "x-orbit-client": client } })
 
@@ -134,6 +116,38 @@ export class AuthController {
     return { ok: true as const }
   }
 }
+
+const authController = AuthController.prototype
+
+Inject(AuthService)(AuthController, undefined, 0)
+Controller("v1/auth")(AuthController)
+
+const registerDescriptor = Object.getOwnPropertyDescriptor(authController, "register")!
+Body()(authController, "register", 0)
+Req()(authController, "register", 1)
+Res({ passthrough: true })(authController, "register", 2)
+HttpCode(HttpStatus.CREATED)(authController, "register", registerDescriptor)
+Post("register")(authController, "register", registerDescriptor)
+
+const loginDescriptor = Object.getOwnPropertyDescriptor(authController, "login")!
+Body()(authController, "login", 0)
+Req()(authController, "login", 1)
+Res({ passthrough: true })(authController, "login", 2)
+Post("login")(authController, "login", loginDescriptor)
+
+const refreshDescriptor = Object.getOwnPropertyDescriptor(authController, "refresh")!
+Req()(authController, "refresh", 0)
+Headers("x-orbit-client")(authController, "refresh", 1)
+Res({ passthrough: true })(authController, "refresh", 2)
+HttpCode(HttpStatus.OK)(authController, "refresh", refreshDescriptor)
+Post("refresh")(authController, "refresh", refreshDescriptor)
+
+const logoutDescriptor = Object.getOwnPropertyDescriptor(authController, "logout")!
+Req()(authController, "logout", 0)
+Headers("x-orbit-client")(authController, "logout", 1)
+Res({ passthrough: true })(authController, "logout", 2)
+HttpCode(HttpStatus.OK)(authController, "logout", logoutDescriptor)
+Post("logout")(authController, "logout", logoutDescriptor)
 
 function requestMetadata(request: Request) {
   return {

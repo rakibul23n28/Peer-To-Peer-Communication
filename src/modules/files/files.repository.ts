@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { FileTransferStatus, MessageKind } from "@prisma/client"
 
@@ -42,7 +42,7 @@ export interface FileOffer {
 
 @Injectable()
 export class FilesRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async offer(conversationId: string, senderId: string, input: FileOffer) {
     return this.prisma.$transaction(async (tx) => {
@@ -156,7 +156,7 @@ export class FilesRepository {
     status: FileTransferStatus,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const conversation = await lockConversation(tx, conversationId, userId)
+      await lockConversation(tx, conversationId, userId)
 
       const file = await tx.fileTransfer.findFirst({
         where: { fileId, conversationId },

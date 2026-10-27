@@ -1,10 +1,10 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { PrismaService } from "../prisma/prisma.service.js"
 
 @Injectable()
 export class UsersRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   search(query: string) {
     return this.prisma.user.findMany({

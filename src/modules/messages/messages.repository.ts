@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { MessageKind, Prisma, ReceiptStatus, WhisperMode } from "@prisma/client"
 
@@ -35,10 +35,8 @@ export interface NewMessage {
 @Injectable()
 export class MessagesRepository {
   constructor(
-    @Inject(PrismaService)
     private readonly prisma: PrismaService,
 
-    @Inject(ConversationsRepository)
     private readonly conversations: ConversationsRepository,
   ) {}
 

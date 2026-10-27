@@ -50,6 +50,11 @@ react(),
           ws: true,
           rewrite: (requestPath) => requestPath.replace(/^\/api/, '/v1'),
         },
+        '/v1': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
         '/ws': {
           target: apiTarget,
           ws: true,

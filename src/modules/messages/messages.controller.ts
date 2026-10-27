@@ -73,20 +73,17 @@ const reactionSchema = z
   })
   .strict()
 
-@Controller("v1/conversations/:conversationId/messages")
-@UseGuards(AuthGuard)
 export class MessagesController {
   constructor(
-    @Inject(MessagesService) private readonly messages: MessagesService,
+    private readonly messages: MessagesService,
   ) {}
 
-  @Get()
   list(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Query("cursor") cursor?: string,
+    cursor?: string,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -98,13 +95,12 @@ export class MessagesController {
     return this.messages.list(conversationId, request.userId, cursor)
   }
 
-  @Post()
   async create(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Body() body: unknown,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -123,15 +119,14 @@ export class MessagesController {
     })
   }
 
-  @Post(":messageId/receipts")
   addReceipt(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Param("messageId") messageId: string,
+    messageId: string,
 
-    @Body() body: unknown,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -148,12 +143,11 @@ export class MessagesController {
     )
   }
 
-  @Put(":messageId")
   edit(
-    @Req() request: AuthRequest,
-    @Param("conversationId") conversationId: string,
-    @Param("messageId") messageId: string,
-    @Body() body: unknown,
+    request: AuthRequest,
+    conversationId: string,
+    messageId: string,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
     z.string().uuid().parse(messageId)
@@ -166,15 +160,14 @@ export class MessagesController {
     })
   }
 
-  @Put(":messageId/reaction")
   setReaction(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Param("messageId") messageId: string,
+    messageId: string,
 
-    @Body() body: unknown,
+    body: unknown,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -195,13 +188,12 @@ export class MessagesController {
     )
   }
 
-  @Delete(":messageId/reaction")
   removeReaction(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Param("messageId") messageId: string,
+    messageId: string,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -214,13 +206,12 @@ export class MessagesController {
     )
   }
 
-  @Delete(":messageId")
   tombstone(
-    @Req() request: AuthRequest,
+    request: AuthRequest,
 
-    @Param("conversationId") conversationId: string,
+    conversationId: string,
 
-    @Param("messageId") messageId: string,
+    messageId: string,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -229,3 +220,59 @@ export class MessagesController {
     return this.messages.tombstone(conversationId, messageId, request.userId)
   }
 }
+
+const controllerPrototype = MessagesController.prototype
+
+const applyMethodDecorator = (decorator: MethodDecorator, method: string) => {
+  const descriptor = Object.getOwnPropertyDescriptor(controllerPrototype, method)
+
+  if (descriptor) decorator(controllerPrototype, method, descriptor)
+}
+
+const applyParameterDecorator = (
+  decorator: ParameterDecorator,
+  method: string,
+  index: number,
+) => decorator(controllerPrototype, method, index)
+
+Inject(MessagesService)(MessagesController, undefined, 0)
+UseGuards(AuthGuard)(MessagesController)
+Controller("v1/conversations/:conversationId/messages")(MessagesController)
+
+applyMethodDecorator(Get(), "list")
+applyParameterDecorator(Req(), "list", 0)
+applyParameterDecorator(Param("conversationId"), "list", 1)
+applyParameterDecorator(Query("cursor"), "list", 2)
+
+applyMethodDecorator(Post(), "create")
+applyParameterDecorator(Req(), "create", 0)
+applyParameterDecorator(Param("conversationId"), "create", 1)
+applyParameterDecorator(Body(), "create", 2)
+
+applyMethodDecorator(Post(":messageId/receipts"), "addReceipt")
+applyParameterDecorator(Req(), "addReceipt", 0)
+applyParameterDecorator(Param("conversationId"), "addReceipt", 1)
+applyParameterDecorator(Param("messageId"), "addReceipt", 2)
+applyParameterDecorator(Body(), "addReceipt", 3)
+
+applyMethodDecorator(Put(":messageId"), "edit")
+applyParameterDecorator(Req(), "edit", 0)
+applyParameterDecorator(Param("conversationId"), "edit", 1)
+applyParameterDecorator(Param("messageId"), "edit", 2)
+applyParameterDecorator(Body(), "edit", 3)
+
+applyMethodDecorator(Put(":messageId/reaction"), "setReaction")
+applyParameterDecorator(Req(), "setReaction", 0)
+applyParameterDecorator(Param("conversationId"), "setReaction", 1)
+applyParameterDecorator(Param("messageId"), "setReaction", 2)
+applyParameterDecorator(Body(), "setReaction", 3)
+
+applyMethodDecorator(Delete(":messageId/reaction"), "removeReaction")
+applyParameterDecorator(Req(), "removeReaction", 0)
+applyParameterDecorator(Param("conversationId"), "removeReaction", 1)
+applyParameterDecorator(Param("messageId"), "removeReaction", 2)
+
+applyMethodDecorator(Delete(":messageId"), "tombstone")
+applyParameterDecorator(Req(), "tombstone", 0)
+applyParameterDecorator(Param("conversationId"), "tombstone", 1)
+applyParameterDecorator(Param("messageId"), "tombstone", 2)

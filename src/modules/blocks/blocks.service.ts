@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common"
+import { Injectable } from "@nestjs/common"
 
 import { badRequest } from "../shared/http-error.filter.js"
 
@@ -7,7 +7,7 @@ import { BlocksRepository } from "./blocks.repository.js"
 @Injectable()
 export class BlocksService {
   constructor(
-    @Inject(BlocksRepository) private readonly repository: BlocksRepository,
+    private readonly repository: BlocksRepository,
   ) {}
 
   list(userId: string) {

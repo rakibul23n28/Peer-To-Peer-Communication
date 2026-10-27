@@ -20,9 +20,8 @@ const publicUserSelection = {
   },
 } as const
 
-@Injectable()
 export class ConversationsRepository {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async list(userId: string) {
     const rows = await this.prisma.conversation.findMany({
@@ -221,3 +220,6 @@ export class ConversationsRepository {
     return [conversation.userA, conversation.userB]
   }
 }
+
+Inject(PrismaService)(ConversationsRepository, undefined, 0)
+Injectable()(ConversationsRepository)

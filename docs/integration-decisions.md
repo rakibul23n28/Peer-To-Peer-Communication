@@ -8,7 +8,6 @@
 | Keep credentials and database access in the Nest server environment. | The browser only calls same-origin API routes and never receives database connection values. |
 | Store encrypted message/file metadata as PostgreSQL `Bytes`; do not store file bytes or plaintext content. | Preserve the end-to-end encryption boundary. |
 | Assign message sequence numbers, persist file offers with their chat item, and delete accounts inside a single Prisma transaction per operation. | Avoid partially persisted domain operations. |
-| Use migrations for production and a Docker-backed throwaway database for integration tests. | Validate an empty-database install without risking a configured hosted database. |
 
 ## Implementation status
 
@@ -22,7 +21,7 @@
 | File metadata | Encrypted filename/thumbnail metadata and hash persist; file bytes are never accepted by the API. Offer and chat item commit together. |
 | WebSocket | Nest gateway authenticates through the auth service and delegates persistence to services/repositories. Prisma is not called from the gateway. The handshake fix was the root cause behind the invalid Safari/Chrome response: the browser and gateway needed the same `/ws` route and a supported subprotocol (`orbit.v1`) before the auth message could be accepted, and invalid tokens now close with code `4401` so the client can refresh and reconnect instead of dropping into a silent HTTP error. |
 | Browser UI | The current signed-in screen is still account-only; chat UI has not yet been connected to the new APIs. |
-| Production verification | Not complete until deploy networking/least-privilege are configured and the Docker integration suite, verification SQL, and browser E2E matrix pass. |
+| Production readiness | Not complete until deploy networking and least-privilege access are configured and the browser chat UI is connected to the APIs. |
 
 ## Required deployment settings
 
@@ -31,5 +30,4 @@
 - Rotate any credentials previously shared in chat. Never commit `.env` or put database values in `VITE_*` variables.
 - Run `npm run db:migrate:deploy` during deployment. Use `npm run db:migrate:dev` only against development databases. Existing databases with tables but no Prisma migration history require a reviewed baseline/transition before deploy; never reset them to force the initial migration.
 - For the known pre-Prisma Orbit schema, use `npm run db:migrate:baseline:legacy` once after a backup, then `npm run db:migrate:deploy` to apply the forward transition. Do not use this baseline against an empty database.
-- Run `npm run test:integration` against the disposable Docker database. It resets only that throwaway database and runs `scripts/verify-db.sql` after the repository integration suite.
-- Production databases must begin with zero rows. There is no production seed; any seed data must be explicitly restricted to development/test.
+- Production databases must begin with zero rows. There is no production seed; any seed data must be restricted to development environments.

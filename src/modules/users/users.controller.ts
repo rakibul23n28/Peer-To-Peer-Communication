@@ -26,16 +26,12 @@ const publicKeySchema = z
   .object({ publicKey: z.string().min(32).max(4096) })
   .strict()
 
-@Controller("v1/users")
 export class UsersController {
-  constructor(@Inject(UsersService) private readonly users: UsersService) {}
+  constructor(private readonly users: UsersService) {}
 
-  @Get("search")
-
-  @UseGuards(AuthGuard)
   async search(
-    @Query("q") query: string | undefined,
-    @Req() request: AuthRequest,
+    query: string | undefined,
+    request: AuthRequest,
   ) {
     const input = z.string().min(3).max(64).parse(query)
 
@@ -44,39 +40,26 @@ export class UsersController {
     return { users: users.filter((user) => user.id !== request.userId) }
   }
 
-  @Get(":id/public-key")
-
-  @UseGuards(AuthGuard)
-  publicKey(@Param("id") id: string) {
+  publicKey(id: string) {
     z.string().uuid().parse(id)
 
     return this.users.publicKey(id)
   }
 
-  @Get("me")
-
-  @UseGuards(AuthGuard)
-  me(@Req() request: AuthRequest) {
+  me(request: AuthRequest) {
     return this.users.me(request.userId)
   }
 
-  @Put("me/public-key")
-
-  @UseGuards(AuthGuard)
-  replacePublicKey(@Req() request: AuthRequest, @Body() body: unknown) {
+  replacePublicKey(request: AuthRequest, body: unknown) {
     return this.users.replacePublicKey(
       request.userId,
       publicKeySchema.parse(body).publicKey,
     )
   }
 
-  @Delete("me")
-
-  @UseGuards(AuthGuard)
   async deleteAccount(
-    @Req() request: AuthRequest,
-
-    @Res({ passthrough: true }) response: Response,
+    request: AuthRequest,
+    response: Response,
   ) {
     await this.users.deleteAccount(request.userId)
 
@@ -85,3 +68,31 @@ export class UsersController {
     return { ok: true as const }
   }
 }
+
+const usersController = UsersController.prototype
+
+Controller("v1/users")(UsersController)
+Inject(UsersService)(UsersController, undefined, 0)
+
+Get("search")(usersController, "search", Object.getOwnPropertyDescriptor(usersController, "search")!)
+UseGuards(AuthGuard)(usersController, "search", Object.getOwnPropertyDescriptor(usersController, "search")!)
+Query("q")(usersController, "search", 0)
+Req()(usersController, "search", 1)
+
+Get(":id/public-key")(usersController, "publicKey", Object.getOwnPropertyDescriptor(usersController, "publicKey")!)
+UseGuards(AuthGuard)(usersController, "publicKey", Object.getOwnPropertyDescriptor(usersController, "publicKey")!)
+Param("id")(usersController, "publicKey", 0)
+
+Get("me")(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)
+UseGuards(AuthGuard)(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)
+Req()(usersController, "me", 0)
+
+Put("me/public-key")(usersController, "replacePublicKey", Object.getOwnPropertyDescriptor(usersController, "replacePublicKey")!)
+UseGuards(AuthGuard)(usersController, "replacePublicKey", Object.getOwnPropertyDescriptor(usersController, "replacePublicKey")!)
+Req()(usersController, "replacePublicKey", 0)
+Body()(usersController, "replacePublicKey", 1)
+
+Delete("me")(usersController, "deleteAccount", Object.getOwnPropertyDescriptor(usersController, "deleteAccount")!)
+UseGuards(AuthGuard)(usersController, "deleteAccount", Object.getOwnPropertyDescriptor(usersController, "deleteAccount")!)
+Req()(usersController, "deleteAccount", 0)
+Res({ passthrough: true })(usersController, "deleteAccount", 1)

@@ -18,6 +18,8 @@ import { PrismaModule } from "../modules/prisma/prisma.module.js"
 
 import { UsersModule } from "../modules/users/users.module.js"
 
+import { TurnModule } from "../modules/turn/turn.module.js"
+
 @Module({
   imports: [
     PrismaModule,
@@ -25,6 +27,8 @@ import { UsersModule } from "../modules/users/users.module.js"
     AuthModule,
 
     UsersModule,
+
+    TurnModule,
 
     BlocksModule,
 

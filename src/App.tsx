@@ -5,6 +5,7 @@ import {
   clearSession,
   getMe,
   getAccessToken,
+  getUserPublicKey,
   loginRequest,
   refreshAccessToken,
   registerRequest,
@@ -17,6 +18,7 @@ import {
 } from './auth/session';
 import {
   generateDeviceIdentity,
+  archiveDeviceIdentity,
   getDeviceIdentity,
   saveDeviceIdentity,
   type DeviceIdentity,
@@ -126,6 +128,9 @@ export default function App() {
       setPendingUser(identity);
       setPhase('key-recovery');
       return false;
+    }
+    if (local.keyVersion !== identity.keyVersion) {
+      await saveDeviceIdentity({ ...local, keyVersion: identity.keyVersion });
     }
     setUser(identity);
     setPhase('signed-in');
@@ -272,7 +277,7 @@ export default function App() {
           return;
         }
       }
-      const savedIdentity = { ...identity, userId: session.user.id };
+      const savedIdentity = { ...identity, userId: session.user.id, keyVersion: session.user.keyVersion };
       setAccessToken(session.accessToken);
       setPendingUser(session.user);
       setPendingIdentity(savedIdentity);
@@ -297,9 +302,24 @@ export default function App() {
     setIsBusy(true);
     setMessage('');
     try {
+      const previousIdentity = await getDeviceIdentity(pendingUser.id);
+      if (previousIdentity && previousIdentity.fingerprint !== pendingUser.fingerprint) {
+        for (let keyVersion = 1; keyVersion < pendingUser.keyVersion; keyVersion += 1) {
+          try {
+            const previousKey = await getUserPublicKey(pendingUser.id, keyVersion);
+            if (previousKey.fingerprint === previousIdentity.fingerprint) {
+              await archiveDeviceIdentity(previousIdentity, keyVersion);
+              break;
+            }
+          } catch (error) {
+            if (!(error instanceof ApiError) || error.status !== 404) throw error;
+          }
+        }
+      }
       const identity = pendingIdentity ?? await generateDeviceIdentity(pendingUser.id);
-      setPendingIdentity(identity);
-      await saveDeviceIdentity(identity);
+      const nextIdentity = { ...identity, userId: pendingUser.id, keyVersion: pendingUser.keyVersion + 1 };
+      setPendingIdentity(nextIdentity);
+      await saveDeviceIdentity(nextIdentity);
       await replacePublicKey(identity.publicKeyBase64);
       const updatedUser = await getMe();
       setUser(updatedUser);

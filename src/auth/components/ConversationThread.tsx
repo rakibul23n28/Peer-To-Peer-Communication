@@ -6,13 +6,14 @@ import { initials } from './OrbitMark';
 
 export type ThreadMessage = EncryptedMessage & {
   plaintext: string;
-  decryptedReactions: string[];
+  decryptionError?: string;
+  decryptedReactions: Array<{ userId: string; value: string }>;
   decryptedFileName?: string;
   sendState?: 'queued' | 'sending' | 'sent' | 'failed';
   sendError?: string;
 };
 
-export type FileTransferProgress = { transferred: number; total: number; error?: string };
+export type FileTransferProgress = { transferred: number; total: number; error?: string; verified?: boolean };
 export type ReceivedFile = { name: string; blob: Blob; url: string };
 
 interface ConversationThreadProps {
@@ -23,7 +24,6 @@ interface ConversationThreadProps {
   peerBlocked: boolean;
   fileSending: boolean;
   filePickerRef: RefObject<HTMLInputElement | null>;
-  peerRequestState: 'idle' | 'requested' | 'received' | 'accepted';
   threadMessages: ThreadMessage[];
   threadError: string;
   receivedFiles: Record<string, ReceivedFile>;
@@ -34,14 +34,15 @@ interface ConversationThreadProps {
   draft: string;
   sending: boolean;
   outboxCount: number;
-  threadEndRef: RefObject<HTMLDivElement | null>;
+  messageListRef: RefObject<HTMLElement | null>;
+  hasOlderMessages: boolean;
+  loadingOlderMessages: boolean;
   onBack: () => void;
-  onRequestPeer: () => void;
   onBlock: () => void;
   onUnblock: () => void;
-  onRespondPeer: (accepted: boolean) => void;
   onRetryThread: () => void;
   onMessageListScroll: (nearBottom: boolean) => void;
+  onLoadOlderMessages: () => void;
   onAcceptFile: (item: ThreadMessage) => void;
   onDeclineFile: (item: ThreadMessage) => void;
   onCancelFile: (item: ThreadMessage) => void;
@@ -90,7 +91,6 @@ export function ConversationThread({
   peerBlocked,
   fileSending,
   filePickerRef,
-  peerRequestState,
   threadMessages,
   threadError,
   receivedFiles,
@@ -101,14 +101,15 @@ export function ConversationThread({
   draft,
   sending,
   outboxCount,
-  threadEndRef,
+  messageListRef,
+  hasOlderMessages,
+  loadingOlderMessages,
   onBack,
-  onRequestPeer,
   onBlock,
   onUnblock,
-  onRespondPeer,
   onRetryThread,
   onMessageListScroll,
+  onLoadOlderMessages,
   onAcceptFile,
   onDeclineFile,
   onCancelFile,
@@ -139,31 +140,25 @@ export function ConversationThread({
         <div className="orbit-thread-meta"><span>@{conversation.peer.username}</span><span className={`orbit-connection-pill${connection === 'connected' ? ' is-connected' : ''}`}><i />{connection === 'connected' ? 'Secure link' : 'Reconnecting'}</span></div>
       </div>
       <div className="orbit-thread-actions">
-        <button type="button" title="Share a file or media" aria-label="Share file or media" disabled={!deviceIdentityAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()}>
-          <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing' : 'Share media'}</span>
-        </button>
-        <button type="button" title="Request direct peer access" aria-label="Request direct peer access" disabled={connection !== 'connected'} onClick={onRequestPeer}>
-          <OrbitIcon name="link" /><span>{peerRequestState === 'requested' ? 'Request sent' : 'Direct link'}</span>
-        </button>
         {!peerBlocked && <button className="orbit-thread-block" type="button" title="Block contact" aria-label="Block contact" onClick={onBlock}>
           <OrbitIcon name="shield" />
         </button>}
       </div>
     </header>
 
-    {peerRequestState === 'received' && <div className="orbit-peer-request" role="status">
-      <span>This contact is requesting direct file-sharing access.</span>
-      <button type="button" onClick={() => onRespondPeer(true)}>Allow</button>
-      <button type="button" onClick={() => onRespondPeer(false)}>Decline</button>
-    </div>}
     {peerBlocked && <div className="orbit-blocked-banner" role="status">
       You blocked @{conversation.peer.username}. Messages and file sharing are disabled.
       <button type="button" onClick={onUnblock}>Unblock</button>
     </div>}
-    <section className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite" onScroll={(event) => {
+    <section ref={messageListRef} className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite" onScroll={(event) => {
       const element = event.currentTarget;
+      if (element.scrollTop <= 72 && hasOlderMessages && !loadingOlderMessages) onLoadOlderMessages();
       onMessageListScroll(element.scrollHeight - element.scrollTop - element.clientHeight < 96);
     }}>
+      {(hasOlderMessages || loadingOlderMessages) && <div className="orbit-history-loader" role="status">
+        <span className={loadingOlderMessages ? 'is-loading' : ''} />
+        {loadingOlderMessages ? 'Loading earlier messages' : 'Scroll up for earlier messages'}
+      </div>}
       {threadMessages.length === 0 && !threadError && <div className="orbit-thread-empty">
         <span className="orbit-empty-glyph"><OrbitIcon name="spark" size={23} /></span>
         <span className="eyebrow">A PRIVATE SPACE FOR TWO</span>
@@ -183,16 +178,59 @@ export function ConversationThread({
                 <span aria-hidden="true"><OrbitIcon name="file" /></span>
                 <div><strong>{item.decryptedFileName ?? 'Encrypted file'}</strong><small>{formatFileSize(Number(item.file.size))} · {item.file.mime}</small></div>
               </div>
+              {(() => {
+                const progress = fileProgress[item.file.fileId];
+                const total = Number(item.file.size);
+                const transferring = item.file.status === 'transferring' || item.file.status === 'accepted';
+                const verifiedBytes = Boolean(progress && progress.total > 0 && progress.transferred > 0);
+                const percentage = verifiedBytes
+                  ? Math.min(100, Math.round((progress.transferred / Math.max(progress.total, 1)) * 100))
+                  : 0;
+                const complete = item.file.status === 'received' || progress?.verified === true;
+                const waiting = item.file.status === 'offered';
+                const error = progress?.error;
+                const label = complete
+                  ? 'Verified'
+                  : error
+                    ? 'Transfer failed'
+                    : waiting
+                      ? item.senderId === user.id ? 'Waiting for acceptance' : 'Ready to share'
+                      : item.file.status === 'accepted'
+                        ? 'Connecting'
+                        : !verifiedBytes
+                          ? 'Connecting'
+                        : percentage >= 100
+                          ? 'Verifying'
+                          : 'Sending';
+                const detail = complete
+                  ? 'Ready'
+                  : error
+                    ? error
+                    : item.file.status === 'failed'
+                      ? 'Retry with a TURN relay'
+                      : waiting
+                        ? item.senderId === user.id ? '' : 'Accept to receive'
+                        : item.file.status === 'accepted'
+                          ? 'Secure peer connection'
+                        : !verifiedBytes
+                          ? 'Secure peer connection'
+                        : percentage >= 100
+                          ? 'Checking file'
+                          : `${percentage}% · ${formatFileSize(progress?.transferred ?? 0)} / ${formatFileSize(total)}`;
+                return <div className={`orbit-transfer-status${error ? ' has-error' : ''}${complete ? ' is-complete' : ''}`} role={error ? 'alert' : 'status'}>
+                  <span className={`orbit-transfer-mark${transferring && !error && !complete ? ' is-active' : ''}`}>
+                    {complete ? <OrbitIcon name="check" size={14} /> : error || item.file.status === 'failed' ? <OrbitIcon name="close" size={14} /> : <OrbitIcon name={waiting ? 'file' : 'link'} size={14} />}
+                  </span>
+                  <span className="orbit-transfer-copy"><strong>{label}</strong>{detail && <small>{detail}</small>}</span>
+                  {transferring && !error && !complete && <span className={`orbit-transfer-track${verifiedBytes && percentage < 100 ? ' is-determinate' : ' is-indeterminate'}`} aria-label={verifiedBytes ? `${percentage}% transferred` : 'Connecting'}>
+                    <span style={verifiedBytes && percentage < 100 ? { width: `${percentage}%` } : undefined} />
+                  </span>}
+                </div>;
+              })()}
               {receivedFiles[item.file.fileId] && item.file.mime.startsWith('image/') && <img className="orbit-file-preview" src={receivedFiles[item.file.fileId].url} alt={item.decryptedFileName ?? 'Shared image'} />}
               {receivedFiles[item.file.fileId] && item.file.mime.startsWith('video/') && <video className="orbit-file-preview" src={receivedFiles[item.file.fileId].url} controls />}
               {receivedFiles[item.file.fileId] && item.file.mime.startsWith('audio/') && <audio className="orbit-file-audio" src={receivedFiles[item.file.fileId].url} controls />}
-              {fileProgress[item.file.fileId] && <div className="orbit-file-progress">
-                {fileProgress[item.file.fileId].error
-                  ? <span role="alert">{fileProgress[item.file.fileId].error}</span>
-                  : <><progress max={Math.max(fileProgress[item.file.fileId].total, 1)} value={fileProgress[item.file.fileId].transferred} /><small>{formatFileSize(fileProgress[item.file.fileId].transferred)} / {formatFileSize(fileProgress[item.file.fileId].total)}</small></>}
-              </div>}
               <div className="orbit-file-card-footer">
-                <span>{item.file.status === 'offered' ? 'Waiting for acceptance' : item.file.status === 'accepted' ? 'Accepted · waiting for peer' : item.file.status === 'transferring' ? 'Transferring directly' : item.file.status === 'received' ? 'Received and verified' : item.file.status}</span>
                 {receivedFiles[item.file.fileId] && <a href={receivedFiles[item.file.fileId].url} download={receivedFiles[item.file.fileId].name} aria-label={`Download ${receivedFiles[item.file.fileId].name}`} title="Download file"><OrbitIcon name="download" /></a>}
                 {item.senderId !== user.id && item.file.status === 'offered' && <>
                   <button type="button" onClick={() => onAcceptFile(item)} aria-label="Accept file" title="Accept file"><OrbitIcon name="check" /></button>
@@ -201,13 +239,13 @@ export function ConversationThread({
                 {item.file.status === 'offered' && item.senderId === user.id && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file offer" title="Cancel offer"><OrbitIcon name="close" /></button>}
                 {(item.file.status === 'accepted' || item.file.status === 'transferring') && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file transfer" title="Cancel transfer"><OrbitIcon name="close" /></button>}
               </div>
-              <p className="orbit-file-privacy">File bytes travel through an encrypted peer-to-peer connection; Orbit stores only the encrypted offer and transfer metadata.</p>
             </div> : editingId === item.id ? <div className="orbit-edit-form">
               <textarea aria-label="Edit message" value={editDraft} onChange={(event) => onEditDraftChange(event.target.value)} />
               <button type="button" onClick={() => onEditTextMessage(item)}>Save edit</button>
               <button type="button" onClick={onCancelEdit}>Cancel</button>
-            </div> : <p>{item.plaintext}</p>}
-            {item.decryptedReactions.length > 0 && <div className="orbit-message-reactions">{item.decryptedReactions.map((reaction, index) => <span key={`${item.id}-${index}`}>{reaction}</span>)}</div>}
+            </div> : <p className={item.decryptionError ? 'orbit-message-undecryptable' : undefined} title={item.decryptionError}>
+              {item.decryptionError ? 'Encrypted message · key unavailable on this device' : item.plaintext}
+            </p>}
             <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
               {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
                 {item.sendState === 'failed'
@@ -231,12 +269,16 @@ export function ConversationThread({
                 <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
               </>}
               <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
-              <button type="button" title="React with heart" aria-label="React with heart" onClick={() => onReact(item, '❤️')}><OrbitIcon name="heart" size={14} /></button>
+              {(() => {
+                const hasHeart = item.decryptedReactions.some((reaction) => reaction.userId === user.id && reaction.value === '❤️');
+                return <button className={`orbit-heart-action${hasHeart ? ' is-active' : ''}`} type="button" title={hasHeart ? 'Remove heart reaction' : 'React with heart'} aria-label={hasHeart ? 'Remove your heart reaction' : 'React with heart'} aria-pressed={hasHeart} onClick={() => onReact(item, '❤️')}>
+                  <OrbitIcon name="heart" size={15} />
+                </button>;
+              })()}
             </div>}
           </article>
         </div>;
       })}
-      <div ref={threadEndRef} />
     </section>
 
     <form className="orbit-composer" onSubmit={onSendMessage}>
@@ -255,8 +297,8 @@ export function ConversationThread({
       <div className="orbit-composer-bottom">
         <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'End-to-end encrypted · Enter to send'}</span>
         {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected'} onClick={onRetryAllQueued}>Retry queued</button>}
-        <button className="orbit-attach-action" type="button" disabled={!deviceIdentityAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()} aria-label="Attach file or media">
-          <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing…' : 'Attach media'}</span>
+        <button className="orbit-attach-action" type="button" title="Attach a file or media" disabled={!deviceIdentityAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()} aria-label="Attach a file or media">
+          <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing…' : 'Attach file'}</span>
         </button>
         <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentityAvailable || peerBlocked}>
           <span>{sending ? 'Sending…' : 'Send'}</span><OrbitIcon name="send" size={16} />

@@ -224,7 +224,7 @@
   align-items: center;
   gap: 10px;
   color: #91a8a4;
-  font-size: 9px;
+  font-size: 8px;
 }
 
 .orbit-connection-pill {
@@ -353,10 +353,13 @@
 }
 
 .orbit-message.is-own {
-  border-color: #d29d6043;
+  border-color: #d69a5068;
   border-radius: 17px 17px 5px 17px;
-  background: linear-gradient(140deg, #393024f5, #272126f5 78%);
-  box-shadow: 0 10px 28px #00000020, inset 0 1px #b5fff20d;
+  background:
+    radial-gradient(ellipse at 100% 0, #f3bb6a12, transparent 56%),
+    linear-gradient(145deg, #342c25f5, #241f22f8 82%);
+  box-shadow: 0 10px 28px #00000020, inset 0 1px #ffe2b312, 0 0 22px #ecaa6508;
+  animation: orbit-message-arrive .24s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .orbit-message.is-own::after,
@@ -370,7 +373,7 @@
 
 .orbit-message.is-own::after {
   right: -4px;
-  border-right: 1px solid #d29d6043;
+  border-right: 1px solid #d69a5068;
   transform: rotate(30deg);
 }
 
@@ -460,6 +463,63 @@
   color: #ff9f87;
 }
 
+.orbit-message-actions .orbit-heart-action {
+  color: #c9aaa1;
+}
+
+.orbit-message-actions .orbit-heart-action:hover,
+.orbit-message-actions .orbit-heart-action:focus-visible {
+  border-color: #ed857b45;
+  background: #ed857b12;
+  color: #ff8e88;
+}
+
+.orbit-message-actions .orbit-heart-action.is-active {
+  border-color: #ee7e774a;
+  background: #ee7e7719;
+  color: #ff7778;
+}
+
+.orbit-message-actions .orbit-heart-action.is-active svg {
+  fill: currentColor;
+  stroke-width: 1.5;
+}
+
+.orbit-history-loader {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: center;
+  margin: -8px 0 8px;
+  padding: 5px 11px;
+  border: 1px solid #ffffff0e;
+  border-radius: 99px;
+  background: #19191de8;
+  color: #aaa5ad;
+  font-size: 8px;
+  backdrop-filter: blur(12px);
+}
+
+.orbit-history-loader > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #eab46c;
+  box-shadow: 0 0 9px #eab46c66;
+}
+
+.orbit-history-loader > span.is-loading {
+  border: 1px solid #eab46c;
+  border-top-color: transparent;
+  background: transparent;
+  animation: orbit-status-spin .7s linear infinite;
+}
+
 .orbit-file-card-footer button,
 .orbit-file-card-footer a {
   min-width: 34px;
@@ -507,7 +567,25 @@
 }
 
 .orbit-file-card {
-  min-width: min(56vw, 340px);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.orbit-message.is-file-message {
+  min-width: 0;
+  max-width: min(92%, 470px);
+}
+
+.orbit-file-card-heading,
+.orbit-transfer-copy {
+  min-width: 0;
+}
+
+.orbit-file-card-heading strong,
+.orbit-file-card-heading small,
+.orbit-transfer-copy small {
+  overflow-wrap: anywhere;
 }
 
 .orbit-file-card-heading > span {
@@ -519,6 +597,110 @@
   color: var(--orbit-cyan);
 }
 
+.orbit-transfer-status {
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid #ffffff0f;
+  border-radius: 12px;
+  background: #ffffff04;
+}
+
+.orbit-transfer-mark {
+  position: relative;
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border: 1px solid #f2b66d32;
+  border-radius: 10px;
+  background: #f2b66d0b;
+  color: #e6b56f;
+}
+
+.orbit-transfer-mark.is-active::before,
+.orbit-transfer-mark.is-active::after {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid #f2b66d44;
+  border-radius: 13px;
+  content: '';
+  animation: orbit-transfer-pulse 1.8s ease-out infinite;
+}
+
+.orbit-transfer-mark.is-active::after {
+  animation-delay: .9s;
+}
+
+.orbit-transfer-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.orbit-transfer-copy strong {
+  color: #efe5d8;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.orbit-transfer-copy small {
+  overflow: hidden;
+  color: #aa9d91;
+  font-size: 8px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+}
+
+.orbit-transfer-status.has-error {
+  border-color: #ef8f7840;
+  background: #ef8f7808;
+}
+
+.orbit-transfer-status.has-error .orbit-transfer-mark {
+  border-color: #ef8f7840;
+  color: #f08e78;
+}
+
+.orbit-transfer-status.is-complete .orbit-transfer-mark {
+  border-color: #d7bc7540;
+  background: #d7bc750d;
+  color: #d9c37e;
+}
+
+.orbit-transfer-track {
+  position: relative;
+  height: 4px;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #ffffff12;
+}
+
+.orbit-transfer-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d69a50, #f3cf86);
+  box-shadow: 0 0 11px #e4ad5b55;
+  transition: width .18s ease-out;
+}
+
+.orbit-transfer-track.is-indeterminate > span {
+  width: 34%;
+  animation: orbit-transfer-sweep 1.35s ease-in-out infinite;
+}
+
+.orbit-transfer-track.is-determinate > span {
+  min-width: 2px;
+}
+
+.orbit-transfer-status.has-error .orbit-transfer-copy small {
+  color: #f3a18a;
+}
+
 .orbit-file-preview {
   border-color: #ffffff20;
   border-radius: 13px;
@@ -526,10 +708,10 @@
 
 .orbit-composer {
   flex: 0 0 auto;
-  gap: 7px;
-  padding: 10px 12px 9px;
-  border-color: #ffffff1b;
-  border-radius: 20px;
+  gap: 4px;
+  padding: 6px 9px 5px;
+  border-color: #ffffff18;
+  border-radius: 16px;
   background: linear-gradient(145deg, #10202af2, #0d1923f5);
   box-shadow: 0 17px 55px #0000003b, inset 0 1px #ffffff0c;
 }
@@ -540,17 +722,17 @@
 }
 
 .orbit-composer > textarea {
-  min-height: 42px;
-  max-height: 140px;
-  padding: 8px 7px 4px;
+  min-height: 31px;
+  max-height: 100px;
+  padding: 5px 6px 2px;
   font-size: 12px;
-  resize: vertical;
+  resize: none;
 }
 
 .orbit-composer-bottom {
-  min-height: 38px;
-  gap: 8px;
-  padding-top: 7px;
+  min-height: 30px;
+  gap: 6px;
+  padding-top: 5px;
   border-top-color: #ffffff10;
 }
 
@@ -561,14 +743,15 @@
 }
 
 .orbit-composer-bottom .orbit-attach-action {
-  min-height: 35px;
+  min-height: 29px;
+  border-radius: 9px;
 }
 
 .orbit-composer-bottom .orbit-primary-action {
-  min-height: 36px;
+  min-height: 30px;
   gap: 8px;
-  padding: 0 14px;
-  border-radius: 12px;
+  padding: 0 11px;
+  border-radius: 9px;
   background: linear-gradient(120deg, #ffd394, #e8ad61);
   color: #271a0d;
   font-weight: 700;
@@ -636,13 +819,13 @@
 
 @media (max-width: 900px) {
   .orbit-thread-header {
-    grid-template-columns: 36px 40px minmax(0, 1fr);
+    grid-template-columns: 36px 40px minmax(0, 1fr) 36px;
   }
 
   .orbit-thread-actions {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
-    padding-bottom: 3px;
+    grid-column: 4;
+    justify-content: flex-end;
+    padding: 0;
   }
 
   .orbit-thread-actions button {
@@ -662,7 +845,7 @@
 
   .orbit-thread-header {
     min-height: 67px;
-    grid-template-columns: 34px 38px minmax(0, 1fr);
+    grid-template-columns: 34px 38px minmax(0, 1fr) 32px;
     gap: 8px;
     padding: 8px 0 7px;
   }
@@ -682,8 +865,10 @@
   }
 
   .orbit-thread-actions {
-    grid-column: 1 / -1;
-    padding: 0 0 3px 42px;
+    grid-column: 4;
+    grid-row: 1;
+    justify-content: flex-end;
+    padding: 0;
   }
 
   .orbit-thread-actions button {
@@ -700,17 +885,23 @@
     padding: 12px 3px 18px;
   }
 
+  .orbit-message-undecryptable {
+    color: #e6b486;
+    font-size: 11px !important;
+  }
+
   .orbit-message {
     max-width: 88%;
     padding: 10px 12px 8px;
   }
 
   .orbit-file-card {
-    min-width: min(68vw, 300px);
+    width: 100%;
+    min-width: 0;
   }
 
   .orbit-composer {
-    padding: 8px 9px;
+    padding: 6px 8px;
     border-radius: 16px;
   }
 
@@ -724,12 +915,26 @@
   }
 
   .orbit-composer-bottom .orbit-attach-action {
-    min-height: 34px;
+    min-height: 30px;
     padding: 0 9px;
   }
 }
 
 @media (max-width: 390px) {
+  .orbit-message.is-file-message {
+    max-width: 96%;
+  }
+
+  .orbit-file-card-heading {
+    gap: 8px;
+  }
+
+  .orbit-transfer-status {
+    grid-template-columns: 27px minmax(0, 1fr);
+    gap: 7px;
+    padding: 7px;
+  }
+
   .orbit-thread-actions button span {
     max-width: 89px;
     overflow: hidden;
@@ -750,7 +955,13 @@
     transition: none;
   }
 
-  .orbit-shell::after {
+  .orbit-shell::after,
+  .orbit-transfer-mark.is-active::before,
+  .orbit-transfer-mark.is-active::after,
+  .orbit-transfer-track.is-indeterminate > span,
+  .orbit-sending-indicator,
+  .orbit-history-loader > span.is-loading,
+  .orbit-message.is-own {
     animation: none;
   }
 }
@@ -763,4 +974,19 @@
 
 @keyframes orbit-status-spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes orbit-message-arrive {
+  from { opacity: .7; transform: translateY(5px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes orbit-transfer-pulse {
+  0% { opacity: .8; transform: scale(.86); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+@keyframes orbit-transfer-sweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(350%); }
 }

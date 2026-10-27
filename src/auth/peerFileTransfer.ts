@@ -1,3 +1,5 @@
+import { getTurnIceConfiguration } from './session';
+
 export type PeerFileSignal =
   | { type: 'accept'; fileId: string }
   | { type: 'offer'; fileId: string; sdp: string }
@@ -21,6 +23,14 @@ const chunkSize = 32 * 1024;
 const ivSize = 12;
 const headerSize = 4 + ivSize;
 
+async function getIceServers(): Promise<RTCIceServer[]> {
+  const { iceServers } = await getTurnIceConfiguration();
+  return [
+    { urls: 'stun:stun.l.google.com:19302' },
+    ...iceServers,
+  ];
+}
+
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -32,15 +42,17 @@ export class PeerFileTransfer {
   private channel: RTCDataChannel | null = null;
   private readonly pendingCandidates: RTCIceCandidateInit[] = [];
   private readonly receivedChunks = new Map<number, ArrayBuffer>();
+  private readonly acknowledgedChunks = new Set<number>();
   private source: ArrayBuffer | null = null;
   private failed = false;
   private completed = false;
+  private iceServers: RTCIceServer[] = [];
 
   constructor(private readonly options: PeerFileTransferOptions) {}
 
   async startSender(source: ArrayBuffer): Promise<void> {
     this.source = source;
-    this.createConnection();
+    await this.createConnection();
     const channel = this.connection!.createDataChannel('orbit-file', { ordered: true });
     this.setChannel(channel, true);
     const offer = await this.connection!.createOffer();
@@ -54,7 +66,7 @@ export class PeerFileTransfer {
   }
 
   async acceptOffer(sdp: string): Promise<void> {
-    this.createConnection();
+    await this.createConnection();
     this.connection!.ondatachannel = (event) => this.setChannel(event.channel, false);
     await this.connection!.setRemoteDescription({ type: 'offer', sdp });
     await this.flushCandidates();
@@ -92,10 +104,12 @@ export class PeerFileTransfer {
     this.connection = null;
   }
 
-  private createConnection(): void {
+  private async createConnection(): Promise<void> {
     if (this.connection) return;
+    this.iceServers = await getIceServers();
     const connection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: this.iceServers,
+      iceCandidatePoolSize: 2,
     });
     this.connection = connection;
     connection.onicecandidate = (event) => {
@@ -108,7 +122,13 @@ export class PeerFileTransfer {
     };
     connection.onconnectionstatechange = () => {
       if (connection.connectionState === 'failed') {
-        this.fail(new Error('A direct connection could not be established. Check both network connections and retry.'));
+        const hasTurn = this.iceServers.some((server) => {
+          const urls = typeof server.urls === 'string' ? [server.urls] : server.urls;
+          return urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'));
+        });
+        this.fail(new Error(hasTurn
+          ? 'Peer connection failed. Check peer availability and relay credentials.'
+          : 'Peer connection failed. Add a TURN relay to support restrictive networks.'));
       }
     };
   }
@@ -124,7 +144,11 @@ export class PeerFileTransfer {
     };
     channel.onerror = () => this.fail(new Error('The direct file-transfer channel failed.'));
     channel.onmessage = (event) => {
-      if (sender || !(event.data instanceof ArrayBuffer)) return;
+      if (sender) {
+        this.receiveAcknowledgement(event.data);
+        return;
+      }
+      if (!(event.data instanceof ArrayBuffer)) return;
       void this.receiveChunk(event.data).catch((error: unknown) => {
         this.fail(error instanceof Error ? error : new Error('Could not decrypt the received file.'));
       });
@@ -136,7 +160,6 @@ export class PeerFileTransfer {
     const source = this.source;
     if (!channel || !source) return;
     const totalChunks = Math.ceil(source.byteLength / chunkSize);
-    let transferred = 0;
     for (let index = 0; index < totalChunks; index += 1) {
       if (this.failed || channel.readyState !== 'open') return;
       await this.waitForBuffer(channel);
@@ -149,9 +172,34 @@ export class PeerFileTransfer {
       packet.set(iv, 4);
       packet.set(new Uint8Array(encrypted), headerSize);
       channel.send(packet);
-      transferred += plaintext.byteLength;
-      this.options.onProgress(transferred, this.options.size);
     }
+  }
+
+  private receiveAcknowledgement(data: unknown): void {
+    if (typeof data !== 'string') return;
+    let acknowledgement: unknown;
+    try {
+      acknowledgement = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!acknowledgement || typeof acknowledgement !== 'object') return;
+    const packet = acknowledgement as { type?: unknown; fileId?: unknown; index?: unknown };
+    const totalChunks = Math.ceil(this.options.size / chunkSize);
+    if (
+      packet.type !== 'ack' ||
+      packet.fileId !== this.options.fileId ||
+      !Number.isSafeInteger(packet.index) ||
+      (packet.index as number) < 0 ||
+      (packet.index as number) >= totalChunks ||
+      this.acknowledgedChunks.has(packet.index as number)
+    ) return;
+    this.acknowledgedChunks.add(packet.index as number);
+    const transferred = [...this.acknowledgedChunks].reduce(
+      (total, index) => total + Math.min(chunkSize, this.options.size - index * chunkSize),
+      0,
+    );
+    this.options.onProgress(transferred, this.options.size);
   }
 
   private async receiveChunk(packet: ArrayBuffer): Promise<void> {
@@ -170,6 +218,9 @@ export class PeerFileTransfer {
     const expectedSize = Math.min(chunkSize, this.options.size - index * chunkSize);
     if (plaintext.byteLength !== expectedSize) throw new Error('The received file data has an invalid size.');
     this.receivedChunks.set(index, plaintext);
+    if (this.channel?.readyState === 'open') {
+      this.channel.send(JSON.stringify({ type: 'ack', fileId: this.options.fileId, index }));
+    }
     const transferred = [...this.receivedChunks.values()].reduce((total, chunk) => total + chunk.byteLength, 0);
     this.options.onProgress(transferred, this.options.size);
     if (this.receivedChunks.size === totalChunks) await this.finishReceive();

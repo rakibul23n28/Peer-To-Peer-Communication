@@ -89,6 +89,11 @@ export interface PublicKeyResponse {
   keyVersion: number
 }
 
+export interface TurnIceConfiguration {
+  iceServers: RTCIceServer[]
+  expiresAt?: number
+}
+
 export interface SessionResponse {
   accessToken: string
 
@@ -352,6 +357,10 @@ export async function apiRequest<T>(
   return response.json() as Promise<T>
 }
 
+export function getTurnIceConfiguration(): Promise<TurnIceConfiguration> {
+  return apiRequest<TurnIceConfiguration>("/turn/credentials")
+}
+
 export async function signOutRequest(): Promise<void> {
   await apiRequest<{ ok: true }>("/auth/logout", { method: "POST" })
 
@@ -412,8 +421,12 @@ export function createConversation(peerId: string): Promise<{ conversation: { id
   })
 }
 
-export function getMessages(conversationId: string): Promise<{ messages: EncryptedMessage[]; nextCursor: string | null }> {
-  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages`)
+export function getMessages(
+  conversationId: string,
+  cursor?: string | null,
+): Promise<{ messages: EncryptedMessage[]; nextCursor: string | null }> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages${query}`)
 }
 
 export function getUserPublicKey(userId: string, keyVersion: number): Promise<PublicKeyResponse> {
@@ -498,6 +511,15 @@ export function setMessageReaction(
   return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reaction`, {
     method: "PUT",
     body: JSON.stringify(input),
+  })
+}
+
+export function removeMessageReaction(
+  conversationId: string,
+  messageId: string,
+): Promise<{ ok: true }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reaction`, {
+    method: "DELETE",
   })
 }
 

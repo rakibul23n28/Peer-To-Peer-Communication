@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   addMessageReceipt,
@@ -12,6 +12,7 @@ import {
   getConversations,
   listBlocks,
   searchUsers,
+  removeMessageReaction,
   setMessageReaction,
   unblockUser,
   updateFileStatus,
@@ -30,7 +31,7 @@ import {
   type OrbitConnectionState,
 } from './orbitSocket';
 import { decryptMessage, derivePeerKey, encryptMessage } from './messageCrypto';
-import { getDeviceIdentity, type DeviceIdentity } from './keyStore';
+import { getDeviceIdentity, getDeviceIdentityForVersion, getSavedDeviceIdentities, type DeviceIdentity } from './keyStore';
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
 import { PeerFileTransfer, type PeerFileSignal } from './peerFileTransfer';
 import { ConversationThread, type FileTransferProgress, type ThreadMessage } from './components/ConversationThread';
@@ -58,6 +59,19 @@ type OutboxMessage = {
   peerPublicKey?: string;
   queuedAt?: string;
 };
+
+interface MessageKeyMetadata {
+  senderId: string | null;
+  senderKeyVersion?: number | null;
+  recipientKeyVersion?: number | null;
+  keyVersion: number | null;
+}
+
+interface DecryptedWithKeyVersions {
+  plaintext: string;
+  identity: DeviceIdentity;
+  peerPublicKey: string;
+}
 
 function isOutboxMessage(value: unknown): value is OutboxMessage {
   if (!value || typeof value !== 'object') return false;
@@ -184,9 +198,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentity | null>(null);
   const [outboxCount, setOutboxCount] = useState(0);
   const [outboxRevision, setOutboxRevision] = useState(0);
-  const [peerRequestState, setPeerRequestState] = useState<'idle' | 'requested' | 'received' | 'accepted'>('idle');
-  const [peerRequestId, setPeerRequestId] = useState<string | null>(null);
-  const [peerRequestConversationId, setPeerRequestConversationId] = useState<string | null>(null);
   const [fileShortcutPending, setFileShortcutPending] = useState(false);
   const [fileSending, setFileSending] = useState(false);
   const [fileProgress, setFileProgress] = useState<Record<string, FileTransferProgress>>({});
@@ -195,8 +206,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   receivedFilesRef.current = receivedFiles;
   const [blockedUsers, setBlockedUsers] = useState<UserSearchResult[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(false);
-  const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const messageListRef = useRef<HTMLElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const lastAutoScrollTokenRef = useRef('');
+  const pendingScrollHeightRef = useRef<number | null>(null);
+  const olderCursorRef = useRef<string | null>(null);
+  const historyConversationRef = useRef<string | null>(null);
+  const loadingOlderRef = useRef(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const filePickerRef = useRef<HTMLInputElement | null>(null);
   const deliveredRef = useRef(new Set<string>());
   const flushingMessagesRef = useRef(new Set<string>());
@@ -351,6 +369,68 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     return keyRequest;
   }, []);
 
+  const decryptWithAvailableKeyVersions = useCallback(async (
+    identity: DeviceIdentity,
+    conversation: ConversationSummary,
+    message: MessageKeyMetadata,
+    ciphertext: string,
+    iv: string,
+  ): Promise<DecryptedWithKeyVersions> => {
+    const sentByCurrentUser = message.senderId === user.id;
+    const localVersions = [...new Set([
+      sentByCurrentUser ? message.senderKeyVersion : message.recipientKeyVersion,
+      message.keyVersion,
+      identity.keyVersion,
+      user.keyVersion,
+    ].filter((version): version is number => Number.isSafeInteger(version) && (version ?? 0) > 0))];
+    const peerVersions = [...new Set([
+      sentByCurrentUser ? message.recipientKeyVersion : message.senderKeyVersion,
+      message.keyVersion,
+      conversation.peer.keyVersion,
+    ].filter((version): version is number => Number.isSafeInteger(version) && (version ?? 0) > 0))];
+
+    const identities = [identity];
+    for (const version of localVersions) {
+      const historical = await getDeviceIdentityForVersion(user.id, version);
+      if (historical && !identities.some(({ fingerprint }) => fingerprint === historical.fingerprint)) {
+        identities.push(historical);
+      }
+    }
+    for (const savedIdentity of await getSavedDeviceIdentities(user.id)) {
+      if (!identities.some(({ fingerprint }) => fingerprint === savedIdentity.fingerprint)) {
+        identities.push(savedIdentity);
+      }
+    }
+
+    let lastFailure: unknown;
+    for (const localIdentity of identities) {
+      for (const version of peerVersions) {
+        let publicKey: string;
+        try {
+          publicKey = await peerPublicKeyForVersion(conversation, version);
+        } catch (error) {
+          lastFailure = error;
+          continue;
+        }
+        try {
+          return {
+            plaintext: await decryptMessage(localIdentity, conversation, ciphertext, iv, publicKey),
+            identity: localIdentity,
+            peerPublicKey: publicKey,
+          };
+        } catch (error) {
+          lastFailure = error;
+        }
+      }
+    }
+    const localVersionsLabel = localVersions.join(', ') || 'unknown';
+    const peerVersionsLabel = peerVersions.join(', ') || 'unknown';
+    const detail = lastFailure instanceof Error ? ` ${lastFailure.message}` : '';
+    throw new Error(
+      `No saved key pair could open this message (your key version ${localVersionsLabel}; contact key version ${peerVersionsLabel}).${detail}`,
+    );
+  }, [peerPublicKeyForVersion, user.id, user.keyVersion]);
+
   useEffect(() => {
     if (!deviceIdentity) return;
     let active = true;
@@ -359,20 +439,16 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (!message) return [conversation.id, 'No messages yet'] as const;
       if (message.kind === 'file') return [conversation.id, 'File shared'] as const;
       try {
-        const keyVersion = message.senderId === user.id
-          ? message.recipientKeyVersion ?? message.keyVersion ?? conversation.peer.keyVersion
-          : message.senderKeyVersion ?? message.keyVersion ?? conversation.peer.keyVersion;
-        const peerPublicKey = await peerPublicKeyForVersion(conversation, keyVersion);
-        const preview = await decryptMessage(
+        const decrypted = await decryptWithAvailableKeyVersions(
           deviceIdentity,
           conversation,
+          message,
           message.ciphertext,
           message.iv,
-          peerPublicKey,
         );
-        return [conversation.id, preview] as const;
+        return [conversation.id, decrypted.plaintext] as const;
       } catch {
-        return [conversation.id, 'Unable to decrypt this message'] as const;
+        return [conversation.id, 'Encrypted message · key unavailable'] as const;
       }
     })).then((entries) => {
       if (active) setConversationPreviews(Object.fromEntries(entries));
@@ -380,7 +456,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     return () => {
       active = false;
     };
-  }, [conversations, deviceIdentity, peerPublicKeyForVersion, user.id]);
+  }, [conversations, decryptWithAvailableKeyVersions, deviceIdentity, user.id]);
 
   useEffect(() => {
     let active = true;
@@ -403,35 +479,121 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     for (const file of Object.values(receivedFilesRef.current)) URL.revokeObjectURL(file.url);
   }, []);
 
+  const decryptMessagePage = useCallback(async (
+    messages: EncryptedMessage[],
+    conversation: ConversationSummary,
+    identity: DeviceIdentity,
+  ): Promise<Array<{ message: ThreadMessage; textDecrypted: boolean }>> => Promise.all(messages.map(async (item) => {
+    let plaintext = item.deletedAt ? 'Message deleted' : 'Unable to decrypt this message.';
+    let decryptionError: string | undefined;
+    let peerPublicKey = '';
+    let decryptionIdentity = identity;
+    if (!item.deletedAt && item.ciphertext && item.iv) {
+      try {
+        const decrypted = await decryptWithAvailableKeyVersions(
+          identity,
+          conversation,
+          item,
+          item.ciphertext,
+          item.iv,
+        );
+        plaintext = decrypted.plaintext;
+        decryptionIdentity = decrypted.identity;
+        peerPublicKey = decrypted.peerPublicKey;
+      } catch (error) {
+        const cached = item.kind === 'text' && item.senderId === user.id
+          ? await getLocalMessage(item.clientMsgId)
+          : null;
+        if (cached) {
+          plaintext = cached.plaintext;
+        } else {
+          decryptionError = error instanceof Error
+            ? error.message
+            : 'The matching private key is not available on this device.';
+        }
+      }
+    }
+
+    const decryptedReactions = await Promise.all(item.reactions.map(async (reaction) => {
+      if (!peerPublicKey) return null;
+      try {
+        return {
+          userId: reaction.userId,
+          value: await decryptMessage(
+            decryptionIdentity,
+            conversation,
+            reaction.reactionEnc,
+            reaction.iv,
+            peerPublicKey,
+          ),
+        };
+      } catch {
+        return null;
+      }
+    }));
+
+    let decryptedFileName: string | undefined;
+    if (item.kind === 'file' && item.file && peerPublicKey) {
+      try {
+        const key = await derivePeerKey(
+          decryptionIdentity,
+          conversation.id,
+          peerPublicKey,
+          'orbit-file-name-v1',
+        );
+        const name = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: decodeBase64(item.file.nameIv) },
+          key,
+          decodeBase64(item.file.nameEnc),
+        );
+        decryptedFileName = new TextDecoder().decode(name);
+      } catch {
+        decryptedFileName = 'Encrypted file';
+      }
+    }
+
+    return {
+      message: {
+        ...item,
+        plaintext,
+        ...(decryptionError ? { decryptionError } : {}),
+        decryptedReactions: decryptedReactions.filter((reaction) => reaction !== null),
+        decryptedFileName,
+      },
+      textDecrypted: Boolean(!item.deletedAt && item.ciphertext && item.iv && !decryptionError),
+    };
+  })), [decryptWithAvailableKeyVersions, user.id]);
+
   const refreshThread = useCallback(async () => {
-    if (!selected || !deviceIdentity) return;
+    const conversation = conversationsRef.current.find(({ id }) => id === selectedId);
+    if (!conversation || !deviceIdentity) return;
     const loadId = ++threadLoadIdRef.current;
     try {
       const storageKey = `orbit-outbox:${user.id}`;
       const outbox = readOutbox(storageKey);
       setOutboxCount(outbox.length);
       const pending = await Promise.all(outbox
-        .filter((item) => item.conversationId === selected.id)
+        .filter((item) => item.conversationId === conversation.id)
         .map((item) => toPendingThreadMessage(
           item,
           deviceIdentity,
-          selected,
+          conversation,
           user.id,
           flushingMessagesRef.current.has(item.clientMsgId),
         )));
       if (loadId !== threadLoadIdRef.current) return;
       setThreadMessages((current) => {
         const existingMessages = current.filter((item) =>
-          item.conversationId === selected.id && !item.sendState,
+          item.conversationId === conversation.id && !item.sendState,
         );
-        const pendingIds = new Set(pending.map((item) => item.clientMsgId));
         return [
           ...existingMessages,
           ...pending,
         ];
       });
 
-      const response = await getMessages(selected.id);
+      const response = await getMessages(conversation.id);
+      if (historyConversationRef.current !== conversation.id) return;
       for (const item of response.messages) {
         if (
           item.senderId === user.id &&
@@ -446,95 +608,44 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       }
       const persistedIds = new Set(response.messages.map((item) => item.clientMsgId));
       const confirmedOutboxIds = outbox
-        .filter((item) => item.conversationId === selected.id && persistedIds.has(item.clientMsgId))
+        .filter((item) => item.conversationId === conversation.id && persistedIds.has(item.clientMsgId))
         .map((item) => item.clientMsgId);
       const remainingOutbox = outbox.filter((item) =>
-        item.conversationId !== selected.id || !persistedIds.has(item.clientMsgId),
+        item.conversationId !== conversation.id || !persistedIds.has(item.clientMsgId),
       );
       if (remainingOutbox.length !== outbox.length) writeOutbox(storageKey, remainingOutbox);
       setOutboxCount(remainingOutbox.length);
-      const decryptedResults = await Promise.all(response.messages.map(async (item) => {
-        let plaintext = item.deletedAt ? 'Message deleted' : 'Unable to decrypt this message.';
-        let textDecrypted = false;
-        const peerKeyVersion = item.senderId === user.id
-          ? item.recipientKeyVersion
-          : item.senderKeyVersion;
-        let peerPublicKey = '';
-        let peerKeyError = '';
-        try {
-          peerPublicKey = await peerPublicKeyForVersion(
-            selected,
-            peerKeyVersion || selected.peer.keyVersion,
-          );
-        } catch (error) {
-          peerKeyError = error instanceof Error ? error.message : 'The historical contact key is unavailable.';
-        }
-        if (!item.deletedAt && item.ciphertext && item.iv && item.kind === 'text') {
-          if (!peerKeyError) {
-            try {
-              plaintext = await decryptMessage(deviceIdentity, selected, item.ciphertext, item.iv, peerPublicKey);
-              textDecrypted = true;
-            } catch {
-              peerKeyError = 'This message could not be opened with the available contact key.';
-            }
-          }
-          if (!textDecrypted && item.senderId === user.id) {
-            const cached = await getLocalMessage(item.clientMsgId);
-            if (cached) plaintext = cached.plaintext;
-          } else if (!textDecrypted && peerKeyError) {
-            plaintext = `Unable to decrypt this message. ${peerKeyError}`;
-          }
-        }
-        const decryptedReactions = await Promise.all(item.reactions.map(async (reaction) => {
-          if (!peerPublicKey) return '';
-          try {
-            return await decryptMessage(deviceIdentity, selected, reaction.reactionEnc, reaction.iv, peerPublicKey);
-          } catch {
-            return '';
-          }
-        }));
-        let decryptedFileName: string | undefined;
-        if (item.kind === 'file' && item.file) {
-          try {
-            const key = await derivePeerKey(
-              deviceIdentity,
-              selected.id,
-              peerPublicKey,
-              'orbit-file-name-v1',
-            );
-            const name = await crypto.subtle.decrypt(
-              { name: 'AES-GCM', iv: decodeBase64(item.file.nameIv) },
-              key,
-              decodeBase64(item.file.nameEnc),
-            );
-            decryptedFileName = new TextDecoder().decode(name);
-          } catch {
-            decryptedFileName = peerKeyError
-              ? `Locked file · ${peerKeyError}`
-              : 'Encrypted file';
-          }
-        }
-        return {
-          message: { ...item, plaintext, decryptedReactions: decryptedReactions.filter(Boolean), decryptedFileName },
-          textDecrypted,
-        };
-      }));
-      if (loadId !== threadLoadIdRef.current) return;
+      const decryptedResults = await decryptMessagePage(response.messages, conversation, deviceIdentity);
+      if (loadId !== threadLoadIdRef.current || historyConversationRef.current !== conversation.id) return;
       const decrypted = decryptedResults.map(({ message }) => message);
       await Promise.all(decryptedResults
         .filter(({ message, textDecrypted }) =>
           textDecrypted && message.senderId === user.id && confirmedOutboxIds.includes(message.clientMsgId),
         )
         .map(({ message }) => removeLocalMessage(message.clientMsgId)));
-      setThreadMessages([
-        ...decrypted,
-        ...pending.filter((item) => !persistedIds.has(item.clientMsgId)).map((item) => ({
+      olderCursorRef.current ??= response.nextCursor;
+      setHasOlderMessages(Boolean(olderCursorRef.current));
+      setThreadMessages((current) => {
+        const oldestFreshSeq = response.messages[0]?.seq;
+        const retainedOlder = oldestFreshSeq
+          ? current.filter((item) => !item.sendState && /^\d+$/.test(item.seq) && BigInt(item.seq) < BigInt(oldestFreshSeq))
+          : [];
+        const merged = new Map<string, ThreadMessage>();
+        for (const item of retainedOlder) merged.set(item.id, item);
+        for (const item of decrypted) merged.set(item.id, item);
+        for (const item of pending.filter((message) => !persistedIds.has(message.clientMsgId)).map((item) => ({
           ...item,
           sendState: flushingMessagesRef.current.has(item.clientMsgId)
             ? 'sending' as const
             : item.sendState,
-        })),
-      ]);
+        }))) merged.set(item.id, item);
+        return [...merged.values()].sort((left, right) => {
+          if (left.sendState && right.sendState) return left.createdAt.localeCompare(right.createdAt);
+          if (left.sendState) return 1;
+          if (right.sendState) return -1;
+          return BigInt(left.seq) < BigInt(right.seq) ? -1 : BigInt(left.seq) > BigInt(right.seq) ? 1 : 0;
+        });
+      });
       setThreadError('');
 
       const unread = response.messages.filter((item) =>
@@ -545,25 +656,86 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       );
       for (const item of unread) {
         deliveredRef.current.add(item.id);
-        void addMessageReceipt(selected.id, item.id, 'delivered').catch(() => deliveredRef.current.delete(item.id));
-        void addMessageReceipt(selected.id, item.id, 'read').catch(() => undefined);
+        void addMessageReceipt(conversation.id, item.id, 'delivered').catch(() => deliveredRef.current.delete(item.id));
+        void addMessageReceipt(conversation.id, item.id, 'read').catch(() => undefined);
       }
     } catch (error) {
       if (loadId === threadLoadIdRef.current) {
         setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
       }
     }
-  }, [deviceIdentity, peerPublicKeyForVersion, selected, user.id]);
+  }, [decryptMessagePage, deviceIdentity, selectedId, user.id]);
+
+  const loadOlderMessages = useCallback(async () => {
+    const conversationId = selectedId;
+    const cursor = olderCursorRef.current;
+    const list = messageListRef.current;
+    if (!conversationId || !cursor || !list || loadingOlderRef.current || !deviceIdentity) return;
+    const conversation = conversationsRef.current.find(({ id }) => id === conversationId);
+    if (!conversation) return;
+    loadingOlderRef.current = true;
+    setLoadingOlderMessages(true);
+    const previousHeight = list.scrollHeight;
+    try {
+      const response = await getMessages(conversationId, cursor);
+      const decrypted = await decryptMessagePage(response.messages, conversation, deviceIdentity);
+      if (historyConversationRef.current !== conversationId) return;
+      pendingScrollHeightRef.current = previousHeight;
+      olderCursorRef.current = response.nextCursor;
+      setHasOlderMessages(Boolean(response.nextCursor));
+      setThreadMessages((current) => {
+        const messages = new Map(current.map((item) => [item.id, item]));
+        for (const { message } of decrypted) messages.set(message.id, message);
+        return [...messages.values()].sort((left, right) => {
+          if (left.sendState && right.sendState) return left.createdAt.localeCompare(right.createdAt);
+          if (left.sendState) return 1;
+          if (right.sendState) return -1;
+          return BigInt(left.seq) < BigInt(right.seq) ? -1 : BigInt(left.seq) > BigInt(right.seq) ? 1 : 0;
+        });
+      });
+    } catch (error) {
+      if (historyConversationRef.current === conversationId) {
+        setThreadError(error instanceof Error ? error.message : 'Could not load earlier messages.');
+      }
+    } finally {
+      loadingOlderRef.current = false;
+      if (historyConversationRef.current === conversationId) setLoadingOlderMessages(false);
+    }
+  }, [decryptMessagePage, deviceIdentity, selectedId]);
 
   useEffect(() => {
     setThreadMessages([]);
     setThreadError('');
     deliveredRef.current.clear();
-    if (!selected) return;
+    olderCursorRef.current = null;
+    historyConversationRef.current = selectedId;
+    loadingOlderRef.current = false;
+    setHasOlderMessages(false);
+    setLoadingOlderMessages(false);
+    shouldAutoScrollRef.current = true;
+    lastAutoScrollTokenRef.current = '';
+    if (!selectedId) return;
     void refreshThread();
     const interval = window.setInterval(() => void refreshThread(), 4000);
     return () => window.clearInterval(interval);
-  }, [refreshThread, selected]);
+  }, [refreshThread, selectedId]);
+
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (!list) return;
+    const previousHeight = pendingScrollHeightRef.current;
+    if (previousHeight !== null) {
+      list.scrollTop += list.scrollHeight - previousHeight;
+      pendingScrollHeightRef.current = null;
+      return;
+    }
+    const latestMessage = threadMessages[threadMessages.length - 1];
+    if (!latestMessage || !shouldAutoScrollRef.current) return;
+    const token = `${selectedId}:${latestMessage.id}`;
+    if (token === lastAutoScrollTokenRef.current) return;
+    list.scrollTop = list.scrollHeight;
+    lastAutoScrollTokenRef.current = token;
+  }, [selectedId, threadMessages]);
 
   useEffect(() => {
     const unsubscribe = subscribeOrbitEvents((envelope) => {
@@ -587,6 +759,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
                         ciphertext: newMessage.ciphertext,
                         iv: newMessage.iv,
                         keyVersion: newMessage.keyVersion,
+                        senderKeyVersion: newMessage.senderKeyVersion,
+                        recipientKeyVersion: newMessage.recipientKeyVersion,
                         kind: newMessage.kind,
                         createdAt: newMessage.createdAt,
                       }
@@ -620,27 +794,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         if (event.payload?.conversationId && event.payload.signal) {
           void handleFileSignal(event.payload.conversationId, event.payload.signal);
         }
-      }
-      if (envelope.event === 'file.peer.request') {
-        const event = envelope.data as { payload?: { requestId?: string; conversationId?: string } };
-        setPeerRequestId(event.payload?.requestId ?? null);
-        setPeerRequestConversationId(event.payload?.conversationId ?? null);
-        setPeerRequestState('received');
-        if (event.payload?.conversationId) setSelectedId(event.payload.conversationId);
-      }
-      if (envelope.event === 'file.peer.response') {
-        const event = envelope.data as { payload?: { accepted?: boolean; conversationId?: string } };
-        setPeerRequestId(null);
-        setPeerRequestConversationId(null);
-        setPeerRequestState(event.payload?.accepted ? 'accepted' : 'idle');
-        setNotice(event.payload?.accepted ? 'The peer-to-peer file request was accepted.' : 'The file-sharing request was declined.');
-      }
-      if (envelope.event === 'file.peer.response.error') {
-        const event = envelope.data as { payload?: { message?: string } };
-        setPeerRequestState('idle');
-        setPeerRequestId(null);
-        setPeerRequestConversationId(null);
-        setThreadError(event.payload?.message ?? 'The file-sharing request could not be completed.');
       }
       if (envelope.event === 'receipt.updated') {
         const event = envelope.data as { payload?: { messageId: string; userId: string; status: 'delivered' | 'read'; at?: string } };
@@ -747,12 +900,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
   }
 
-  useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [selectedId, threadMessages.length]);
-
   async function sendTextMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const plaintext = draft.trim();
@@ -784,6 +931,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       setOutboxRevision((revision) => revision + 1);
       setDraft('');
       setReplyTo(null);
+      shouldAutoScrollRef.current = true;
       setThreadMessages((current) => [...current, {
         id: clientMsgId,
         conversationId: selected.id,
@@ -839,48 +987,21 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   async function reactToMessage(item: ThreadMessage, reaction: string) {
     if (!selected || !deviceIdentity) return;
     try {
-      const encrypted = await encryptMessage(deviceIdentity, selected, reaction);
-      await setMessageReaction(selected.id, item.id, {
-        reactionEnc: encrypted.ciphertext,
-        iv: encrypted.iv,
-      });
+      const alreadyReacted = item.decryptedReactions.some(
+        (entry) => entry.userId === user.id && entry.value === reaction,
+      );
+      if (alreadyReacted) {
+        await removeMessageReaction(selected.id, item.id);
+      } else {
+        const encrypted = await encryptMessage(deviceIdentity, selected, reaction);
+        await setMessageReaction(selected.id, item.id, {
+          reactionEnc: encrypted.ciphertext,
+          iv: encrypted.iv,
+        });
+      }
       void refreshThread();
     } catch (error) {
       setThreadError(error instanceof Error ? error.message : 'Could not save the reaction.');
-    }
-  }
-
-  function requestPeerFileShare() {
-    if (!selected || connection !== 'connected') {
-      setThreadError('Connect to Orbit before requesting peer-to-peer file sharing.');
-      return;
-    }
-    try {
-      setPeerRequestState('requested');
-      setThreadError('');
-      const requestId = crypto.randomUUID();
-      setPeerRequestId(requestId);
-      setPeerRequestConversationId(selected.id);
-      sendOrbitEvent('file.peer.request', { conversationId: selected.id, requestId });
-    } catch (error) {
-      setPeerRequestState('idle');
-      setThreadError(error instanceof Error ? error.message : 'Could not request file sharing.');
-    }
-  }
-
-  function respondToPeerRequest(accepted: boolean) {
-    if (!peerRequestConversationId || connection !== 'connected') {
-      setThreadError('Connect to Orbit before responding to a file-sharing request.');
-      return;
-    }
-    try {
-      if (!peerRequestId) throw new Error('This file-sharing request is no longer available.');
-      sendOrbitEvent('file.peer.response', { conversationId: peerRequestConversationId, requestId: peerRequestId, accepted });
-      setPeerRequestState(accepted ? 'accepted' : 'idle');
-      setPeerRequestId(null);
-      setPeerRequestConversationId(null);
-    } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'Could not respond to the request.');
     }
   }
 
@@ -909,7 +1030,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'Could not signal the peer.';
           setFileProgress((current) => ({ ...current, [fileId]: { transferred: 0, total: size, error: reason } }));
-          setThreadError(reason);
         }
       },
       onProgress: (transferred, total) => {
@@ -917,6 +1037,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       },
       onComplete: (blob) => {
         const url = URL.createObjectURL(blob);
+        setFileProgress((current) => ({
+          ...current,
+          [fileId]: { transferred: size, total: size, verified: true },
+        }));
         setReceivedFiles((current) => {
           const previous = current[fileId];
           if (previous) URL.revokeObjectURL(previous.url);
@@ -930,7 +1054,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       onError: (error) => {
         setFileProgress((current) => ({
           ...current,
-          [fileId]: { transferred: current[fileId]?.transferred ?? 0, total: size, error: error.message },
+          [fileId]: {
+            transferred: current[fileId]?.transferred ?? 0,
+            total: size,
+            error: error.message,
+          },
         }));
         void updateFileStatus(conversationId, fileId, 'failed').catch((statusError: unknown) => {
           setThreadError(statusError instanceof Error ? statusError.message : error.message);
@@ -1131,7 +1259,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         await updateFileStatus(conversationId, signal.fileId, 'transferring');
         await transfer.startSender(source);
       } catch (error) {
-        setThreadError(error instanceof Error ? error.message : 'Could not start the direct file transfer.');
+        const reason = error instanceof Error ? error.message : 'Could not start the direct file transfer.';
+        setFileProgress((current) => ({
+          ...current,
+          [signal.fileId]: { transferred: current[signal.fileId]?.transferred ?? 0, total: info?.size ?? 0, error: reason },
+        }));
       }
       return;
     }
@@ -1141,7 +1273,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (signal.type === 'offer') await transfer.acceptOffer(signal.sdp);
       else await transfer.handleSignal(signal);
     } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'The direct file connection failed.');
+      const reason = error instanceof Error ? error.message : 'The direct file connection failed.';
+      setFileProgress((current) => ({
+        ...current,
+        [signal.fileId]: { transferred: current[signal.fileId]?.transferred ?? 0, total: current[signal.fileId]?.total ?? 0, error: reason },
+      }));
     }
   }
 
@@ -1212,7 +1348,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         peerBlocked={peerBlocked}
         fileSending={fileSending}
         filePickerRef={filePickerRef}
-        peerRequestState={peerRequestState}
         threadMessages={threadMessages}
         threadError={threadError}
         receivedFiles={receivedFiles}
@@ -1223,14 +1358,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         draft={draft}
         sending={sending}
         outboxCount={outboxCount}
-        threadEndRef={threadEndRef}
+        messageListRef={messageListRef}
+        hasOlderMessages={hasOlderMessages}
+        loadingOlderMessages={loadingOlderMessages}
         onBack={() => setSelectedId(null)}
-        onRequestPeer={requestPeerFileShare}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
-        onRespondPeer={respondToPeerRequest}
         onRetryThread={() => void refreshThread()}
         onMessageListScroll={(nearBottom) => { shouldAutoScrollRef.current = nearBottom; }}
+        onLoadOlderMessages={() => void loadOlderMessages()}
         onAcceptFile={(item) => void acceptFile(item)}
         onDeclineFile={(item) => void declineFile(item)}
         onCancelFile={(item) => void cancelFile(item)}

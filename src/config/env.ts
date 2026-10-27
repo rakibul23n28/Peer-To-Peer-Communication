@@ -36,8 +36,29 @@ export const envSchema = z
       .optional(),
     DIRECT_URL: z.string().url().optional(),
     REDIS_URL: z.string().default("redis://localhost:6379"),
+    TURN_URLS: z.string().default(""),
+    TURN_SHARED_SECRET: z.string().default("").refine(
+      (value) => value.length === 0 || value.length >= 32,
+      "TURN_SHARED_SECRET must be at least 32 characters",
+    ),
+    TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
   })
   .superRefine((value, context) => {
+    const turnUrls = value.TURN_URLS.split(",").map((url) => url.trim()).filter(Boolean)
+    if (Boolean(turnUrls.length) !== Boolean(value.TURN_SHARED_SECRET)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_SHARED_SECRET"],
+        message: "TURN_URLS and TURN_SHARED_SECRET must be configured together",
+      })
+    }
+    if (turnUrls.some((url) => !/^turns?:/i.test(url))) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_URLS"],
+        message: "TURN_URLS must contain comma-separated turn: or turns: URLs",
+      })
+    }
     if (value.NODE_ENV !== "production") return
     if (
       value.JWT_SECRET.startsWith("development-") ||

@@ -31,6 +31,10 @@ const offerSchema = z
 
     keyVersion: z.number().int().positive(),
 
+    senderKeyVersion: z.number().int().positive().optional(),
+
+    recipientKeyVersion: z.number().int().positive().optional(),
+
     nameEnc: z.string().min(1).max(90_000),
 
     nameIv: z.string().min(1).max(128),
@@ -85,6 +89,10 @@ export class FilesController {
       iv: decodeBase64(input.iv, 1, 32, "IV"),
 
       keyVersion: input.keyVersion,
+
+      senderKeyVersion: input.senderKeyVersion,
+
+      recipientKeyVersion: input.recipientKeyVersion,
 
       nameEnc: decodeBase64(input.nameEnc, 1, 65_536, "Encrypted file name"),
 

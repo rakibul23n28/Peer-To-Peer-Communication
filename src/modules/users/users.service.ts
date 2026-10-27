@@ -18,8 +18,8 @@ export class UsersService {
     return this.users.search(query)
   }
 
-  async publicKey(userId: string) {
-    const result = await this.users.publicKey(userId)
+  async publicKey(userId: string, keyVersion?: number) {
+    const result = await this.users.publicKey(userId, keyVersion)
 
     if (!result) throw notFound("User or public key not found")
 

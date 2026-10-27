@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ConversationSummary, UserIdentity } from '../session';
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitMark, initials } from './OrbitMark';
+import { OrbitIcon } from './OrbitIcon';
 
 interface ConversationSidebarProps {
   user: UserIdentity;
@@ -65,7 +66,7 @@ export function ConversationSidebar({
     <div className="orbit-sidebar-heading">
       <span className="orbit-list-title">Conversations</span>
       <div className="orbit-add-wrap">
-        <button className="orbit-add" type="button" aria-label="New conversation or send a file" aria-haspopup="true" aria-expanded={addMenuOpen} aria-controls="orbit-add-menu" onClick={() => setAddMenuOpen((open) => !open)}>+</button>
+        <button className="orbit-add" type="button" aria-label="New conversation or send a file" aria-haspopup="true" aria-expanded={addMenuOpen} aria-controls="orbit-add-menu" onClick={() => setAddMenuOpen((open) => !open)}><OrbitIcon name="plus" size={17} /></button>
         {addMenuOpen && <div className="orbit-popover" id="orbit-add-menu">
           <button type="button" onClick={() => { onFindSomeone(); setAddMenuOpen(false); }}>Find someone by username</button>
           <button type="button" onClick={() => { onSendFile(); setAddMenuOpen(false); }}>Send a file</button>

@@ -2,13 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   addMessageReceipt,
+  blockUser,
   createConversation,
+  createFileOffer,
   deleteMessage,
   editMessage,
+  getUserPublicKey,
   getMessages,
   getConversations,
+  listBlocks,
   searchUsers,
   setMessageReaction,
+  unblockUser,
+  updateFileStatus,
   type ConversationSummary,
   type EncryptedMessage,
   type UserIdentity,
@@ -23,12 +29,14 @@ import {
   subscribeOrbitEvents,
   type OrbitConnectionState,
 } from './orbitSocket';
-import { decryptMessage, encryptMessage } from './messageCrypto';
+import { decryptMessage, derivePeerKey, encryptMessage } from './messageCrypto';
 import { getDeviceIdentity, type DeviceIdentity } from './keyStore';
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
+import { PeerFileTransfer, type PeerFileSignal } from './peerFileTransfer';
+import { ConversationThread, type FileTransferProgress, type ThreadMessage } from './components/ConversationThread';
 import { ConversationSidebar } from './components/ConversationSidebar';
 import { EmptyConversationState } from './components/EmptyConversationState';
-import { initials } from './components/OrbitMark';
+import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
 
 interface AuthenticatedHomeProps {
   user: UserIdentity;
@@ -37,8 +45,6 @@ interface AuthenticatedHomeProps {
   message: string;
 }
 
-type Dialog = 'search' | 'settings' | null;
-type ThreadMessage = EncryptedMessage & { plaintext: string; decryptedReactions: string[]; sendState?: 'queued' | 'sending' | 'sent' | 'failed'; sendError?: string };
 type OutboxMessage = {
   conversationId: string;
   clientMsgId: string;
@@ -81,6 +87,20 @@ function readOutbox(storageKey: string): OutboxMessage[] {
 
 function writeOutbox(storageKey: string, messages: OutboxMessage[]): void {
   localStorage.setItem(storageKey, JSON.stringify(messages));
+}
+
+function encodeBase64(value: ArrayBuffer): string {
+  const bytes = new Uint8Array(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function decodeBase64(value: string): ArrayBuffer {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer as ArrayBuffer;
 }
 
 function messageEventPayload(item: OutboxMessage) {
@@ -147,7 +167,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [connection, setConnection] = useState<OrbitConnectionState>('offline');
   const [connectionError, setConnectionError] = useState('');
-  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialog, setDialog] = useState<OrbitDialogKind>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searchError, setSearchError] = useState('');
@@ -166,14 +186,27 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [outboxRevision, setOutboxRevision] = useState(0);
   const [peerRequestState, setPeerRequestState] = useState<'idle' | 'requested' | 'received' | 'accepted'>('idle');
   const [peerRequestId, setPeerRequestId] = useState<string | null>(null);
+  const [peerRequestConversationId, setPeerRequestConversationId] = useState<string | null>(null);
   const [fileShortcutPending, setFileShortcutPending] = useState(false);
-  const [selectedFileName, setSelectedFileName] = useState('');
+  const [fileSending, setFileSending] = useState(false);
+  const [fileProgress, setFileProgress] = useState<Record<string, FileTransferProgress>>({});
+  const [receivedFiles, setReceivedFiles] = useState<Record<string, { name: string; blob: Blob; url: string }>>({});
+  const receivedFilesRef = useRef(receivedFiles);
+  receivedFilesRef.current = receivedFiles;
+  const [blockedUsers, setBlockedUsers] = useState<UserSearchResult[]>([]);
+  const [loadingBlocks, setLoadingBlocks] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const filePickerRef = useRef<HTMLInputElement | null>(null);
   const deliveredRef = useRef(new Set<string>());
   const flushingMessagesRef = useRef(new Set<string>());
   const attemptedMessagesRef = useRef(new Set<string>());
   const threadLoadIdRef = useRef(0);
+  const peerPublicKeysRef = useRef(new Map<string, Promise<string>>());
+  const fileTransfersRef = useRef(new Map<string, PeerFileTransfer>());
+  const sourceFilesRef = useRef(new Map<string, File>());
+  const sourceBuffersRef = useRef(new Map<string, ArrayBuffer>());
+  const fileInfoRef = useRef(new Map<string, { size: number; mime: string; sha256: string; recipientKeyVersion: number }>());
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -201,32 +234,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       setLoadingConversations(false);
     }
   }, [user.id]);
-
-  useEffect(() => {
-    if (!deviceIdentity) return;
-    let active = true;
-    void Promise.all(conversations.map(async (conversation) => {
-      const message = conversation.lastMessage;
-      if (!message) return [conversation.id, 'No messages yet'] as const;
-      if (message.kind === 'file') return [conversation.id, 'File shared'] as const;
-      try {
-        const preview = await decryptMessage(
-          deviceIdentity,
-          conversation,
-          message.ciphertext,
-          message.iv,
-        );
-        return [conversation.id, preview] as const;
-      } catch {
-        return [conversation.id, 'Unable to decrypt this message'] as const;
-      }
-    })).then((entries) => {
-      if (active) setConversationPreviews(Object.fromEntries(entries));
-    });
-    return () => {
-      active = false;
-    };
-  }, [conversations, deviceIdentity]);
 
   function selectConversation(conversationId: string) {
     setSelectedId(conversationId);
@@ -318,6 +325,62 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }, [notice]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
+  const peerBlocked = Boolean(selected && blockedUsers.some(({ id }) => id === selected.peer.id));
+
+  const peerPublicKeyForVersion = useCallback(async (
+    conversation: ConversationSummary,
+    keyVersion: number,
+  ): Promise<string> => {
+    if (keyVersion === conversation.peer.keyVersion) return conversation.peer.publicKey;
+    const cacheKey = `${conversation.peer.id}:${keyVersion}`;
+    let keyRequest = peerPublicKeysRef.current.get(cacheKey);
+    if (!keyRequest) {
+      keyRequest = getUserPublicKey(conversation.peer.id, keyVersion).then((response) => {
+        if (response.keyVersion !== keyVersion) {
+          throw new Error(`The contact's encryption key version ${keyVersion} is unavailable.`);
+        }
+        return response.publicKey;
+      });
+      peerPublicKeysRef.current.set(cacheKey, keyRequest);
+      void keyRequest.catch(() => {
+        if (peerPublicKeysRef.current.get(cacheKey) === keyRequest) {
+          peerPublicKeysRef.current.delete(cacheKey);
+        }
+      });
+    }
+    return keyRequest;
+  }, []);
+
+  useEffect(() => {
+    if (!deviceIdentity) return;
+    let active = true;
+    void Promise.all(conversations.map(async (conversation) => {
+      const message = conversation.lastMessage;
+      if (!message) return [conversation.id, 'No messages yet'] as const;
+      if (message.kind === 'file') return [conversation.id, 'File shared'] as const;
+      try {
+        const keyVersion = message.senderId === user.id
+          ? message.recipientKeyVersion ?? message.keyVersion ?? conversation.peer.keyVersion
+          : message.senderKeyVersion ?? message.keyVersion ?? conversation.peer.keyVersion;
+        const peerPublicKey = await peerPublicKeyForVersion(conversation, keyVersion);
+        const preview = await decryptMessage(
+          deviceIdentity,
+          conversation,
+          message.ciphertext,
+          message.iv,
+          peerPublicKey,
+        );
+        return [conversation.id, preview] as const;
+      } catch {
+        return [conversation.id, 'Unable to decrypt this message'] as const;
+      }
+    })).then((entries) => {
+      if (active) setConversationPreviews(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [conversations, deviceIdentity, peerPublicKeyForVersion, user.id]);
 
   useEffect(() => {
     let active = true;
@@ -330,6 +393,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       active = false;
     };
   }, [user.id]);
+
+  useEffect(() => {
+    if (dialog === 'settings') void refreshBlockedUsers();
+  }, [dialog]);
+
+  useEffect(() => () => {
+    for (const transfer of fileTransfersRef.current.values()) transfer.close();
+    for (const file of Object.values(receivedFilesRef.current)) URL.revokeObjectURL(file.url);
+  }, []);
 
   const refreshThread = useCallback(async () => {
     if (!selected || !deviceIdentity) return;
@@ -354,12 +426,24 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         );
         const pendingIds = new Set(pending.map((item) => item.clientMsgId));
         return [
-          ...existingMessages.filter((item) => !pendingIds.has(item.clientMsgId)),
+          ...existingMessages,
           ...pending,
         ];
       });
 
       const response = await getMessages(selected.id);
+      for (const item of response.messages) {
+        if (
+          item.senderId === user.id &&
+          item.kind === 'file' &&
+          item.file &&
+          ['received', 'declined', 'cancelled', 'failed', 'expired'].includes(item.file.status)
+        ) {
+          sourceFilesRef.current.delete(item.file.fileId);
+          sourceBuffersRef.current.delete(item.file.fileId);
+          fileInfoRef.current.delete(item.file.fileId);
+        }
+      }
       const persistedIds = new Set(response.messages.map((item) => item.clientMsgId));
       const confirmedOutboxIds = outbox
         .filter((item) => item.conversationId === selected.id && persistedIds.has(item.clientMsgId))
@@ -368,29 +452,80 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         item.conversationId !== selected.id || !persistedIds.has(item.clientMsgId),
       );
       if (remainingOutbox.length !== outbox.length) writeOutbox(storageKey, remainingOutbox);
-      await Promise.all(response.messages
-        .filter((item) => confirmedOutboxIds.includes(item.clientMsgId))
-        .map((item) => removeLocalMessage(item.clientMsgId)));
       setOutboxCount(remainingOutbox.length);
-      const decrypted = await Promise.all(response.messages.map(async (item): Promise<ThreadMessage> => {
+      const decryptedResults = await Promise.all(response.messages.map(async (item) => {
         let plaintext = item.deletedAt ? 'Message deleted' : 'Unable to decrypt this message.';
+        let textDecrypted = false;
+        const peerKeyVersion = item.senderId === user.id
+          ? item.recipientKeyVersion
+          : item.senderKeyVersion;
+        let peerPublicKey = '';
+        let peerKeyError = '';
+        try {
+          peerPublicKey = await peerPublicKeyForVersion(
+            selected,
+            peerKeyVersion || selected.peer.keyVersion,
+          );
+        } catch (error) {
+          peerKeyError = error instanceof Error ? error.message : 'The historical contact key is unavailable.';
+        }
         if (!item.deletedAt && item.ciphertext && item.iv && item.kind === 'text') {
-          try {
-            plaintext = await decryptMessage(deviceIdentity, selected, item.ciphertext, item.iv);
-          } catch {
-            plaintext = 'Unable to decrypt this message.';
+          if (!peerKeyError) {
+            try {
+              plaintext = await decryptMessage(deviceIdentity, selected, item.ciphertext, item.iv, peerPublicKey);
+              textDecrypted = true;
+            } catch {
+              peerKeyError = 'This message could not be opened with the available contact key.';
+            }
+          }
+          if (!textDecrypted && item.senderId === user.id) {
+            const cached = await getLocalMessage(item.clientMsgId);
+            if (cached) plaintext = cached.plaintext;
+          } else if (!textDecrypted && peerKeyError) {
+            plaintext = `Unable to decrypt this message. ${peerKeyError}`;
           }
         }
         const decryptedReactions = await Promise.all(item.reactions.map(async (reaction) => {
+          if (!peerPublicKey) return '';
           try {
-            return await decryptMessage(deviceIdentity, selected, reaction.reactionEnc, reaction.iv);
+            return await decryptMessage(deviceIdentity, selected, reaction.reactionEnc, reaction.iv, peerPublicKey);
           } catch {
             return '';
           }
         }));
-        return { ...item, plaintext, decryptedReactions: decryptedReactions.filter(Boolean) };
+        let decryptedFileName: string | undefined;
+        if (item.kind === 'file' && item.file) {
+          try {
+            const key = await derivePeerKey(
+              deviceIdentity,
+              selected.id,
+              peerPublicKey,
+              'orbit-file-name-v1',
+            );
+            const name = await crypto.subtle.decrypt(
+              { name: 'AES-GCM', iv: decodeBase64(item.file.nameIv) },
+              key,
+              decodeBase64(item.file.nameEnc),
+            );
+            decryptedFileName = new TextDecoder().decode(name);
+          } catch {
+            decryptedFileName = peerKeyError
+              ? `Locked file · ${peerKeyError}`
+              : 'Encrypted file';
+          }
+        }
+        return {
+          message: { ...item, plaintext, decryptedReactions: decryptedReactions.filter(Boolean), decryptedFileName },
+          textDecrypted,
+        };
       }));
       if (loadId !== threadLoadIdRef.current) return;
+      const decrypted = decryptedResults.map(({ message }) => message);
+      await Promise.all(decryptedResults
+        .filter(({ message, textDecrypted }) =>
+          textDecrypted && message.senderId === user.id && confirmedOutboxIds.includes(message.clientMsgId),
+        )
+        .map(({ message }) => removeLocalMessage(message.clientMsgId)));
       setThreadMessages([
         ...decrypted,
         ...pending.filter((item) => !persistedIds.has(item.clientMsgId)).map((item) => ({
@@ -418,7 +553,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
       }
     }
-  }, [deviceIdentity, selected, user.id]);
+  }, [deviceIdentity, peerPublicKeyForVersion, selected, user.id]);
 
   useEffect(() => {
     setThreadMessages([]);
@@ -475,16 +610,37 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (envelope.event === 'message.edited' || envelope.event === 'message.deleted') {
         void refreshThread();
       }
+      if (envelope.event === 'file.offered' || envelope.event === 'file.status') {
+        void refreshThread();
+      }
+      if (envelope.event === 'file.peer.signal') {
+        const event = envelope.data as {
+          payload?: { conversationId?: string; signal?: PeerFileSignal };
+        };
+        if (event.payload?.conversationId && event.payload.signal) {
+          void handleFileSignal(event.payload.conversationId, event.payload.signal);
+        }
+      }
       if (envelope.event === 'file.peer.request') {
-        const event = envelope.data as { payload?: { requestId?: string } };
+        const event = envelope.data as { payload?: { requestId?: string; conversationId?: string } };
         setPeerRequestId(event.payload?.requestId ?? null);
+        setPeerRequestConversationId(event.payload?.conversationId ?? null);
         setPeerRequestState('received');
+        if (event.payload?.conversationId) setSelectedId(event.payload.conversationId);
       }
       if (envelope.event === 'file.peer.response') {
-        const event = envelope.data as { payload?: { accepted?: boolean } };
+        const event = envelope.data as { payload?: { accepted?: boolean; conversationId?: string } };
         setPeerRequestId(null);
+        setPeerRequestConversationId(null);
         setPeerRequestState(event.payload?.accepted ? 'accepted' : 'idle');
         setNotice(event.payload?.accepted ? 'The peer-to-peer file request was accepted.' : 'The file-sharing request was declined.');
+      }
+      if (envelope.event === 'file.peer.response.error') {
+        const event = envelope.data as { payload?: { message?: string } };
+        setPeerRequestState('idle');
+        setPeerRequestId(null);
+        setPeerRequestConversationId(null);
+        setThreadError(event.payload?.message ?? 'The file-sharing request could not be completed.');
       }
       if (envelope.event === 'receipt.updated') {
         const event = envelope.data as { payload?: { messageId: string; userId: string; status: 'delivered' | 'read'; at?: string } };
@@ -496,7 +652,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       }
     });
     return unsubscribe;
-  }, [refreshThread, selectedId, user.id]);
+  }, [deviceIdentity, peerPublicKeyForVersion, refreshThread, selectedId, user.id]);
 
   useEffect(() => {
     if (connection !== 'connected') attemptedMessagesRef.current.clear();
@@ -592,13 +748,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [threadMessages]);
+    if (shouldAutoScrollRef.current) {
+      threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [selectedId, threadMessages.length]);
 
   async function sendTextMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const plaintext = draft.trim();
-    if (!plaintext || !selected || !deviceIdentity || sending) return;
+    if (!plaintext || !selected || !deviceIdentity || sending || peerBlocked) return;
     setSending(true);
     setThreadError('');
     try {
@@ -702,6 +860,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       setThreadError('');
       const requestId = crypto.randomUUID();
       setPeerRequestId(requestId);
+      setPeerRequestConversationId(selected.id);
       sendOrbitEvent('file.peer.request', { conversationId: selected.id, requestId });
     } catch (error) {
       setPeerRequestState('idle');
@@ -710,17 +869,279 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   function respondToPeerRequest(accepted: boolean) {
-    if (!selected || connection !== 'connected') {
+    if (!peerRequestConversationId || connection !== 'connected') {
       setThreadError('Connect to Orbit before responding to a file-sharing request.');
       return;
     }
     try {
       if (!peerRequestId) throw new Error('This file-sharing request is no longer available.');
-      sendOrbitEvent('file.peer.response', { conversationId: selected.id, requestId: peerRequestId, accepted });
+      sendOrbitEvent('file.peer.response', { conversationId: peerRequestConversationId, requestId: peerRequestId, accepted });
       setPeerRequestState(accepted ? 'accepted' : 'idle');
       setPeerRequestId(null);
+      setPeerRequestConversationId(null);
     } catch (error) {
       setThreadError(error instanceof Error ? error.message : 'Could not respond to the request.');
+    }
+  }
+
+  function relayFileSignal(conversationId: string, signal: PeerFileSignal) {
+    sendOrbitEvent('file.peer.signal', { conversationId, signal });
+  }
+
+  function createFileTransfer(
+    conversationId: string,
+    fileId: string,
+    size: number,
+    mime: string,
+    sha256: string,
+    name: string,
+    key: CryptoKey,
+  ): PeerFileTransfer {
+    const transfer = new PeerFileTransfer({
+      fileId,
+      key,
+      size,
+      mime,
+      sha256,
+      onSignal: (signal) => {
+        try {
+          relayFileSignal(conversationId, signal);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'Could not signal the peer.';
+          setFileProgress((current) => ({ ...current, [fileId]: { transferred: 0, total: size, error: reason } }));
+          setThreadError(reason);
+        }
+      },
+      onProgress: (transferred, total) => {
+        setFileProgress((current) => ({ ...current, [fileId]: { transferred, total } }));
+      },
+      onComplete: (blob) => {
+        const url = URL.createObjectURL(blob);
+        setReceivedFiles((current) => {
+          const previous = current[fileId];
+          if (previous) URL.revokeObjectURL(previous.url);
+          return { ...current, [fileId]: { name, blob, url } };
+        });
+        void updateFileStatus(conversationId, fileId, 'received').catch((error: unknown) => {
+          setThreadError(error instanceof Error ? error.message : 'The file arrived, but its status could not be updated.');
+        });
+        setNotice('File received and verified. It is only stored in this browser.');
+      },
+      onError: (error) => {
+        setFileProgress((current) => ({
+          ...current,
+          [fileId]: { transferred: current[fileId]?.transferred ?? 0, total: size, error: error.message },
+        }));
+        void updateFileStatus(conversationId, fileId, 'failed').catch((statusError: unknown) => {
+          setThreadError(statusError instanceof Error ? statusError.message : error.message);
+        });
+      },
+    });
+    fileTransfersRef.current.set(fileId, transfer);
+    return transfer;
+  }
+
+  async function offerFile(file: File) {
+    if (!selected || !deviceIdentity || fileSending || peerBlocked) return;
+    setFileSending(true);
+    setThreadError('');
+    try {
+      const content = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', content);
+      const sha256 = encodeBase64(digest);
+      const fileId = crypto.randomUUID();
+      const clientMsgId = crypto.randomUUID();
+      const encryptedMessage = await encryptMessage(deviceIdentity, selected, 'Shared a file');
+      const nameKey = await derivePeerKey(
+        deviceIdentity,
+        selected.id,
+        selected.peer.publicKey,
+        'orbit-file-name-v1',
+      );
+      const nameIv = crypto.getRandomValues(new Uint8Array(12));
+      const nameEnc = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: nameIv },
+        nameKey,
+        new TextEncoder().encode(file.name),
+      );
+      await createFileOffer(selected.id, {
+        fileId,
+        clientMsgId,
+        ...encryptedMessage,
+        keyVersion: user.keyVersion,
+        senderKeyVersion: user.keyVersion,
+        recipientKeyVersion: selected.peer.keyVersion,
+        nameEnc: encodeBase64(nameEnc),
+        nameIv: encodeBase64(nameIv.buffer),
+        size: String(file.size),
+        mime: file.type || 'application/octet-stream',
+        sha256,
+      });
+      sourceFilesRef.current.set(fileId, file);
+      sourceBuffersRef.current.set(fileId, content);
+      fileInfoRef.current.set(fileId, {
+        size: file.size,
+        mime: file.type || 'application/octet-stream',
+        sha256,
+        recipientKeyVersion: selected.peer.keyVersion,
+      });
+      const url = URL.createObjectURL(file);
+      setReceivedFiles((current) => ({ ...current, [fileId]: { name: file.name, blob: file, url } }));
+      setNotice('Encrypted file offer sent. The file itself stays on your device until a direct transfer starts.');
+      await refreshThread();
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not create the encrypted file offer.');
+    } finally {
+      setFileSending(false);
+    }
+  }
+
+  async function acceptFile(item: ThreadMessage) {
+    if (!selected || !deviceIdentity || !item.file || item.file.status !== 'offered') return;
+    const size = Number(item.file.size);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      setThreadError('This file offer has an invalid size.');
+      return;
+    }
+    try {
+      const peerPublicKey = await peerPublicKeyForVersion(
+        selected,
+        item.senderKeyVersion || selected.peer.keyVersion,
+      );
+      const key = await derivePeerKey(deviceIdentity, selected.id, peerPublicKey, 'orbit-file-content-v1');
+      const name = item.decryptedFileName ?? 'Shared file';
+      fileInfoRef.current.set(item.file.fileId, {
+        size,
+        mime: item.file.mime,
+        sha256: item.file.sha256,
+        recipientKeyVersion: user.keyVersion,
+      });
+      createFileTransfer(
+        selected.id,
+        item.file.fileId,
+        size,
+        item.file.mime,
+        item.file.sha256,
+        name,
+        key,
+      );
+      await updateFileStatus(selected.id, item.file.fileId, 'accepted');
+      relayFileSignal(selected.id, { type: 'accept', fileId: item.file.fileId });
+      void refreshThread();
+      setNotice('File accepted. Establishing a direct encrypted connection…');
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not accept this file offer.');
+    }
+  }
+
+  async function declineFile(item: ThreadMessage) {
+    if (!selected || !item.file) return;
+    try {
+      await updateFileStatus(selected.id, item.file.fileId, 'declined');
+      void refreshThread();
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not decline this file offer.');
+    }
+  }
+
+  async function cancelFile(item: ThreadMessage) {
+    if (!selected || !item.file) return;
+    try {
+      relayFileSignal(selected.id, { type: 'cancel', fileId: item.file.fileId });
+      await updateFileStatus(selected.id, item.file.fileId, 'cancelled');
+      fileTransfersRef.current.get(item.file.fileId)?.close();
+      fileTransfersRef.current.delete(item.file.fileId);
+      sourceFilesRef.current.delete(item.file.fileId);
+      sourceBuffersRef.current.delete(item.file.fileId);
+      fileInfoRef.current.delete(item.file.fileId);
+      void refreshThread();
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not cancel this file transfer.');
+    }
+  }
+
+  async function refreshBlockedUsers() {
+    setLoadingBlocks(true);
+    try {
+      const response = await listBlocks();
+      setBlockedUsers(response.blocks);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not load blocked contacts.');
+    } finally {
+      setLoadingBlocks(false);
+    }
+  }
+
+  async function blockSelectedUser() {
+    if (!selected) return;
+    try {
+      await blockUser(selected.peer.id);
+      setBlockedUsers((current) => current.some(({ id }) => id === selected.peer.id)
+        ? current
+        : [...current, {
+            id: selected.peer.id,
+            username: selected.peer.username,
+            displayName: selected.peer.displayName,
+          }]);
+      setNotice(`@${selected.peer.username} is blocked.`);
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not block this contact.');
+    }
+  }
+
+  async function unblockContact(userId: string) {
+    try {
+      await unblockUser(userId);
+      setBlockedUsers((current) => current.filter(({ id }) => id !== userId));
+      setNotice('Contact unblocked.');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not unblock this contact.');
+    }
+  }
+
+  async function handleFileSignal(conversationId: string, signal: PeerFileSignal) {
+    if (signal.type === 'accept') {
+      const file = sourceFilesRef.current.get(signal.fileId);
+      const source = sourceBuffersRef.current.get(signal.fileId);
+      const info = fileInfoRef.current.get(signal.fileId);
+      const conversation = conversationsRef.current.find(({ id }) => id === conversationId);
+      if (!file || !source || !info || !conversation || !deviceIdentity) {
+        setFileProgress((current) => ({
+          ...current,
+          [signal.fileId]: { transferred: 0, total: info?.size ?? 0, error: 'The original file is no longer available in this browser.' },
+        }));
+        return;
+      }
+      try {
+        const key = await derivePeerKey(
+          deviceIdentity,
+          conversation.id,
+          await peerPublicKeyForVersion(conversation, info.recipientKeyVersion),
+          'orbit-file-content-v1',
+        );
+        const transfer = createFileTransfer(
+          conversationId,
+          signal.fileId,
+          info.size,
+          info.mime,
+          info.sha256,
+          file.name,
+          key,
+        );
+        await updateFileStatus(conversationId, signal.fileId, 'transferring');
+        await transfer.startSender(source);
+      } catch (error) {
+        setThreadError(error instanceof Error ? error.message : 'Could not start the direct file transfer.');
+      }
+      return;
+    }
+    const transfer = fileTransfersRef.current.get(signal.fileId);
+    if (!transfer) return;
+    try {
+      if (signal.type === 'offer') await transfer.acceptOffer(signal.sdp);
+      else await transfer.handleSignal(signal);
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'The direct file connection failed.');
     }
   }
 
@@ -732,15 +1153,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     } catch {
       setActionError('Clipboard access was denied. Select and copy the fingerprint manually.');
     }
-  }
-
-  function connectionLabel() {
-    if (connection === 'connected') return 'Connected';
-    if (connection === 'connecting') return 'Connecting…';
-    if (connection === 'auth_failed') return 'Session expired';
-    if (connection === 'reconnecting') return 'Reconnecting';
-    if (connection === 'idle') return 'Idle';
-    return 'Offline';
   }
 
   async function openConversation(person: UserSearchResult) {
@@ -775,123 +1187,92 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       onRetryConversations={() => void loadConversations()}
       onRetryConnection={retryOrbitSocket}
       onFindSomeone={() => setDialog('search')}
-      onSendFile={() => { setFileShortcutPending(true); setQuery(''); setDialog('search'); }}
+      onSendFile={() => {
+        if (selected) {
+          filePickerRef.current?.click();
+        } else {
+          setFileShortcutPending(true);
+          setQuery('');
+          setDialog('search');
+        }
+      }}
       onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
       onOpenSettings={() => setDialog('settings')}
       onSignOut={onSignOut}
     />
 
     <section className="orbit-main" aria-label={selected ? `Conversation with ${selected.peer.displayName}` : 'No conversations'}>
-      {selected && <header className="orbit-topbar">
-        <button className="orbit-back-to-list" type="button" onClick={() => setSelectedId(null)}>← Conversations</button>
-      </header>}
-
       {!selected && conversations.length === 0 && !loadingConversations && <EmptyConversationState onFindSomeone={() => setDialog('search')} />}
 
-      {selected && <div className="orbit-thread">
-        <header className="orbit-thread-header">
-          <div className="orbit-thread-orbit" aria-hidden="true">
-            <span className="orbit-art-ring orbit-art-ring--one" />
-            <span className="orbit-art-ring orbit-art-ring--two" />
-            <span className="orbit-stage-line" />
-            <span className="orbit-stage-person orbit-stage-person--self">{initials(user.displayName)}</span>
-            <span className="orbit-stage-person orbit-stage-person--peer">{initials(selected.peer.displayName)}</span>
-            <span className="orbit-stage-star">✳</span>
-          </div>
-          <div className="orbit-thread-person">
-            <span className="eyebrow">DIRECT MESSAGE</span>
-            <h1>{selected.peer.displayName}<em>@{selected.peer.username}</em></h1>
-          </div>
-        </header>
-        <section className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite">
-          {threadMessages.length === 0 && !threadError && <div className="orbit-thread-empty"><span className="eyebrow">A SPACE FOR TWO</span><p>No messages yet. Send a private note to start the conversation.</p></div>}
-          {threadError && <div className="orbit-thread-error" role="alert">{threadError}<button type="button" onClick={() => void refreshThread()}>Retry</button></div>}
-          {threadMessages.map((item) => <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}`} key={item.id}>
-            {item.replyToId && <span className="orbit-reply-caption">REPLY TO / {item.replyToId.slice(0, 8)}</span>}
-            {editingId === item.id ? <div className="orbit-edit-form">
-              <textarea aria-label="Edit message" value={editDraft} onChange={(event) => setEditDraft(event.target.value)} />
-              <button type="button" onClick={() => void editTextMessage(item)}>Save edit</button>
-              <button type="button" onClick={() => setEditingId(null)}>Cancel</button>
-            </div> : <p>{item.plaintext}</p>}
-            {item.decryptedReactions.length > 0 && <div className="orbit-message-reactions">{item.decryptedReactions.map((reaction, index) => <span key={`${item.id}-${index}`}>{reaction}</span>)}</div>}
-            <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
-              {item.senderId === user.id && <span>{item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}</span>}
-            </footer>
-            {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
-              <span>{item.sendError ?? 'Could not send this message.'}</span>
-              <button type="button" onClick={() => retryQueuedMessage(item.clientMsgId)}>Retry</button>
-            </div>}
-            {item.senderId === user.id && !item.deletedAt && !item.sendState && <div className="orbit-message-actions">
-              <button type="button" onClick={() => { setEditingId(item.id); setEditDraft(item.plaintext); }}>Edit</button>
-              <button type="button" onClick={() => void removeTextMessage(item)}>Delete</button>
-            </div>}
-            {!item.deletedAt && <div className="orbit-message-actions">
-              <button type="button" onClick={() => setReplyTo(item.id)}>Reply</button>
-              <button type="button" aria-label="React with heart" onClick={() => void reactToMessage(item, '❤️')}>React ♥</button>
-            </div>}
-          </article>)}
-          <div ref={threadEndRef} />
-        </section>
-        <form className="orbit-composer" onSubmit={(event) => void sendTextMessage(event)}>
-          <input ref={filePickerRef} className="orbit-file-picker" type="file" accept="image/*,video/*" aria-label="Choose a photo or video" onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (!file) return;
-            setSelectedFileName(file.name);
-            setNotice('File selected, but file transfers are not available yet. Nothing was sent.');
-            event.currentTarget.value = '';
-          }} />
-          {selectedFileName && <div className="orbit-file-selection" role="status">
-            <span>{selectedFileName}</span>
-            <button type="button" aria-label="Clear selected file" onClick={() => setSelectedFileName('')}>×</button>
-          </div>}
-          {replyTo && <div className="orbit-replying">Replying to {threadMessages.find((item) => item.id === replyTo)?.plaintext.slice(0, 80) ?? 'message'}<button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
-          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={8000} aria-label="Message" placeholder={deviceIdentity ? 'Write an encrypted message…' : 'Loading your device key…'} disabled={!deviceIdentity} onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }} />
-          <div className="orbit-composer-bottom">
-            <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'Messages are end-to-end encrypted · Enter to send'}</span>
-            {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected'} onClick={retryAllQueuedMessages}>Retry queued</button>}
-            <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentity}>{sending ? 'Sending…' : 'Send'} <span aria-hidden="true">↗</span></button>
-          </div>
-        </form>
-      </div>}
+      {selected && <ConversationThread
+        conversation={selected}
+        user={user}
+        connection={connection}
+        deviceIdentityAvailable={Boolean(deviceIdentity)}
+        peerBlocked={peerBlocked}
+        fileSending={fileSending}
+        filePickerRef={filePickerRef}
+        peerRequestState={peerRequestState}
+        threadMessages={threadMessages}
+        threadError={threadError}
+        receivedFiles={receivedFiles}
+        fileProgress={fileProgress}
+        editingId={editingId}
+        editDraft={editDraft}
+        replyTo={replyTo}
+        draft={draft}
+        sending={sending}
+        outboxCount={outboxCount}
+        threadEndRef={threadEndRef}
+        onBack={() => setSelectedId(null)}
+        onRequestPeer={requestPeerFileShare}
+        onBlock={() => void blockSelectedUser()}
+        onUnblock={() => void unblockContact(selected.peer.id)}
+        onRespondPeer={respondToPeerRequest}
+        onRetryThread={() => void refreshThread()}
+        onMessageListScroll={(nearBottom) => { shouldAutoScrollRef.current = nearBottom; }}
+        onAcceptFile={(item) => void acceptFile(item)}
+        onDeclineFile={(item) => void declineFile(item)}
+        onCancelFile={(item) => void cancelFile(item)}
+        onEditDraftChange={setEditDraft}
+        onEditTextMessage={(item) => void editTextMessage(item)}
+        onCancelEdit={() => setEditingId(null)}
+        onRetryQueuedMessage={retryQueuedMessage}
+        onDeleteTextMessage={(item) => void removeTextMessage(item)}
+        onStartEdit={(item) => { setEditingId(item.id); setEditDraft(item.plaintext); }}
+        onReply={setReplyTo}
+        onReact={(item, reaction) => void reactToMessage(item, reaction)}
+        onOfferFile={(file) => void offerFile(file)}
+        onReplyChange={setReplyTo}
+        onDraftChange={setDraft}
+        onRetryAllQueued={retryAllQueuedMessages}
+        onSendMessage={(event) => void sendTextMessage(event)}
+      />}
       {message && <p className="form-message home-message" role="alert">{message}</p>}
       {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
     </section>
 
     {notice && <div className="orbit-toast" role="status">{notice}</div>}
 
-    {dialog && <div className="orbit-dialog-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) setDialog(null);
-    }}>
-      <section className="orbit-dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-dialog-title" onKeyDown={(event) => {
-        if (event.key === 'Escape') setDialog(null);
-      }}>
-        <button className="orbit-dialog-close" type="button" onClick={() => setDialog(null)} aria-label="Close dialog">×</button>
-        {dialog === 'search' && <>
-          <span className="eyebrow">FIND YOUR PEOPLE / 01</span>
-          <h2 id="orbit-dialog-title">{fileShortcutPending ? 'Who would you like to send a file to?' : 'Find someone.'}</h2>
-          <p>Search by username. Enter at least three characters.</p>
-          <label className="orbit-search-label" htmlFor="orbit-user-search">Username</label>
-          <input id="orbit-user-search" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Start typing a username" autoComplete="off" />
-          {query.trim().length < 3 ? <p className="orbit-dialog-hint">Search starts at 3 characters.</p> : searching ? <p className="orbit-dialog-hint" role="status">Searching Orbit…</p> : searchError ? <p className="orbit-dialog-error" role="alert">{searchError}</p> : results.length === 0 ? <p className="orbit-dialog-hint">No people found for that username.</p> : <div className="orbit-search-results">
-            {results.map((person) => <button type="button" key={person.id} onClick={() => void openConversation(person)}>
-              <span className="orbit-avatar">{initials(person.displayName)}</span><span><strong>{person.displayName}</strong><small>@{person.username}</small></span><span aria-hidden="true">↗</span>
-            </button>)}
-          </div>}
-        </>}
-        {dialog === 'settings' && <>
-          <span className="eyebrow">SETTINGS / DEVICE</span>
-          <h2 id="orbit-dialog-title">Your space, your keys.</h2>
-          <p>Account and device details currently available for this session.</p>
-          <dl className="orbit-settings-list"><div><dt>Username</dt><dd>@{user.username}</dd></div><div><dt>Active key version</dt><dd>{user.keyVersion}</dd></div><div><dt>Device key</dt><dd>Verified against the active server key</dd></div><div><dt>Connection</dt><dd>{connectionLabel()}</dd></div></dl>
-          <button className="orbit-primary-action" type="button" onClick={() => void copyFingerprint(user.fingerprint)}>Copy device fingerprint <span aria-hidden="true">↗</span></button>
-          <button className="orbit-dialog-signout" type="button" disabled={busy} onClick={onSignOut}>Sign out of Orbit</button>
-        </>}
-      </section>
-    </div>}
+    <OrbitDialogs
+      dialog={dialog}
+      user={user}
+      busy={busy}
+      connection={connection}
+      fileShortcutPending={fileShortcutPending}
+      query={query}
+      results={results}
+      searching={searching}
+      searchError={searchError}
+      loadingBlocks={loadingBlocks}
+      blockedUsers={blockedUsers}
+      onQueryChange={setQuery}
+      onOpenConversation={(person) => void openConversation(person)}
+      onClose={() => setDialog(null)}
+      onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
+      onRefreshBlocks={() => void refreshBlockedUsers()}
+      onUnblock={(id) => void unblockContact(id)}
+      onSignOut={onSignOut}
+    />
   </main>;
 }

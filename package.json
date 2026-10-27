@@ -25,6 +25,7 @@
     "@nestjs/platform-express": "^11.2.8",
     "@nestjs/platform-ws": "^11.2.8",
     "@nestjs/websockets": "^11.2.8",
+    "@noble/hashes": "^1.8.0",
     "@prisma/client": "^6.19.3",
     "argon2": "^0.41.1",
     "dexie": "^4.0.11",

@@ -69,6 +69,37 @@ const peerFileRequestSchema = z.object({
   requestId: z.string().uuid(),
 }).strict()
 
+const fileSignalSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("accept"),
+    fileId: z.string().uuid(),
+  }).strict(),
+  z.object({
+    type: z.literal("offer"),
+    fileId: z.string().uuid(),
+    sdp: z.string().min(1).max(32_000),
+  }).strict(),
+  z.object({
+    type: z.literal("answer"),
+    fileId: z.string().uuid(),
+    sdp: z.string().min(1).max(32_000),
+  }).strict(),
+  z.object({
+    type: z.literal("ice"),
+    fileId: z.string().uuid(),
+    candidate: z.object({
+      candidate: z.string().min(1).max(2048),
+      sdpMid: z.string().max(256).nullable().optional(),
+      sdpMLineIndex: z.number().int().min(0).max(1024).nullable().optional(),
+      usernameFragment: z.string().max(256).nullable().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    type: z.literal("cancel"),
+    fileId: z.string().uuid(),
+  }).strict(),
+])
+
 export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleProtocols(protocols: string[] | undefined): string | false {
     if (!protocols || protocols.length === 0) return "orbit.v1"
@@ -422,6 +453,7 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.peerFileRequests.delete(input.requestId)
       return { type: "file.peer.response.error", id: input.requestId, payload: { message: "This file-sharing request has expired or is no longer available." } }
     }
+
     this.peerFileRequests.delete(input.requestId)
     this.sendToUser(request.requesterId, {
       type: "file.peer.response",
@@ -430,6 +462,36 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
       payload: { requestId: input.requestId, conversationId: input.conversationId, accepted: input.accepted },
     })
     return { type: "file.peer.response.ack", id: input.requestId, payload: { ok: true } }
+  }
+
+  async relayFileSignal(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = z.object({
+      conversationId: z.string().uuid(),
+      signal: fileSignalSchema,
+    }).strict().parse(body)
+    const senderId = await this.files.offerSender(input.conversationId, input.signal.fileId)
+    if (!senderId) throw new HttpException("File offer not found", 404)
+
+    const [memberA, memberB] = await this.conversations.memberIds(input.conversationId, userId)
+    const recipientId = memberA === userId ? memberB : memberA
+    const isSender = senderId === userId
+
+    if (
+      (input.signal.type === "offer" && !isSender) ||
+      (input.signal.type === "accept" && isSender) ||
+      (input.signal.type === "answer" && isSender)
+    ) {
+      throw new HttpException("Invalid file-transfer signal direction", 403)
+    }
+
+    this.sendToUser(recipientId, {
+      type: "file.peer.signal",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { conversationId: input.conversationId, signal: input.signal },
+    })
+    return { type: "file.peer.signal.ack", id: input.signal.fileId, payload: { delivered: true } }
   }
 
   private async authenticatedUser(client: WebSocket): Promise<string> {
@@ -541,3 +603,4 @@ registerHandler("file.offer", "offerFile")
 registerHandler("file.status", "updateFile")
 registerHandler("file.peer.request", "requestPeerFileShare")
 registerHandler("file.peer.response", "respondToPeerFileShare")
+registerHandler("file.peer.signal", "relayFileSignal")

@@ -34,6 +34,8 @@ export interface ConversationSummary {
     ciphertext: string
     iv: string
     keyVersion: number | null
+    senderKeyVersion?: number | null
+    recipientKeyVersion?: number | null
     kind: string | null
     createdAt: string | null
   } | null
@@ -58,11 +60,33 @@ export interface EncryptedMessage {
   recipientKeyVersion: number
   replyToId: string | null
   kind: "text" | "file"
+  whisperMode?: "burn_after_read" | "timed"
+  whisperTtlS?: number
   createdAt: string
   editedAt: string | null
   deletedAt: string | null
   receipts: Array<{ userId: string; status: "delivered" | "read"; at: string }>
   reactions: Array<{ userId: string; reactionEnc: string; iv: string }>
+  file?: {
+    fileId: string
+    nameEnc: string
+    nameIv: string
+    size: string
+    mime: string
+    sha256: string
+    thumbEnc: string | null
+    thumbIv: string | null
+    width: number | null
+    height: number | null
+    status: 'offered' | 'accepted' | 'transferring' | 'received' | 'declined' | 'cancelled' | 'failed' | 'expired'
+  } | null
+}
+
+export interface PublicKeyResponse {
+  id: string
+  publicKey: string
+  fingerprint: string
+  keyVersion: number
 }
 
 export interface SessionResponse {
@@ -287,7 +311,6 @@ export async function apiRequest<T>(
   }
 
   if (tokenUsed) headers.set("Authorization", `Bearer ${tokenUsed}`)
-
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
 
@@ -391,6 +414,63 @@ export function createConversation(peerId: string): Promise<{ conversation: { id
 
 export function getMessages(conversationId: string): Promise<{ messages: EncryptedMessage[]; nextCursor: string | null }> {
   return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages`)
+}
+
+export function getUserPublicKey(userId: string, keyVersion: number): Promise<PublicKeyResponse> {
+  return apiRequest(`/users/${encodeURIComponent(userId)}/public-key?version=${keyVersion}`)
+}
+
+export function updateFileStatus(
+  conversationId: string,
+  fileId: string,
+  status: 'accepted' | 'declined' | 'transferring' | 'received' | 'cancelled' | 'failed',
+): Promise<{ fileId: string; status: string }> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/files/${encodeURIComponent(fileId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export interface FileOfferInput {
+  fileId: string
+  clientMsgId: string
+  ciphertext: string
+  iv: string
+  keyVersion: number
+  senderKeyVersion?: number
+  recipientKeyVersion?: number
+  nameEnc: string
+  nameIv: string
+  size: string
+  mime: string
+  sha256: string
+  thumbEnc?: string
+  thumbIv?: string
+  width?: number
+  height?: number
+}
+
+export function createFileOffer(conversationId: string, input: FileOfferInput): Promise<{
+  messageId: string
+  seq: string
+  fileId: string
+}> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/files/offer`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function listBlocks(): Promise<{ blocks: UserSearchResult[] }> {
+  return apiRequest('/users/me/blocks')
+}
+
+export function blockUser(userId: string): Promise<{ ok: true }> {
+  return apiRequest(`/users/me/blocks/${encodeURIComponent(userId)}`, { method: 'PUT' })
+}
+
+export function unblockUser(userId: string): Promise<{ ok: true }> {
+  return apiRequest(`/users/me/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' })
 }
 
 export function editMessage(

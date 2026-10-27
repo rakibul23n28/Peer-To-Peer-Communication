@@ -20,6 +20,10 @@ export class FilesService {
   ) {
     return this.repository.updateStatus(conversationId, fileId, userId, status)
   }
+
+  offerSender(conversationId: string, fileId: string) {
+    return this.repository.offerSender(conversationId, fileId)
+  }
 }
 
 Inject(FilesRepository)(FilesService, undefined, 0)

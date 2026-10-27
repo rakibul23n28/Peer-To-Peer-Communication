@@ -2919,3 +2919,255 @@
     padding-top: 8px;
   }
 }
+
+.orbit-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.orbit-thread-actions button,
+.orbit-peer-request button,
+.orbit-blocked-banner button,
+.orbit-file-card-footer button,
+.orbit-file-card-footer a,
+.orbit-attach-action {
+  min-height: 31px;
+  padding: 0 10px;
+  border: 1px solid #3b6272;
+  border-radius: 7px;
+  background: #10232e;
+  color: #b6e8ed;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.orbit-thread-actions button:hover,
+.orbit-peer-request button:hover,
+.orbit-blocked-banner button:hover,
+.orbit-file-card-footer button:hover,
+.orbit-file-card-footer a:hover,
+.orbit-attach-action:hover:not(:disabled) {
+  border-color: #69d7dc;
+  background: #16323d;
+}
+
+.orbit-thread-actions button:disabled,
+.orbit-attach-action:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.orbit-peer-request,
+.orbit-blocked-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid #635a8a;
+  border-radius: 9px;
+  background: #211f351c;
+  color: #ddd6ff;
+  font-size: 10px;
+}
+
+.orbit-peer-request > span,
+.orbit-blocked-banner {
+  flex: 1;
+}
+
+.orbit-blocked-banner {
+  justify-content: space-between;
+  border-color: #966057;
+  background: #4a211f24;
+  color: #ffd1c2;
+}
+
+.orbit-message.is-file-message {
+  width: min(100%, 470px);
+  max-width: min(92%, 470px);
+  padding: 10px;
+}
+
+.orbit-file-card {
+  display: grid;
+  gap: 10px;
+  min-width: min(58vw, 310px);
+}
+
+.orbit-file-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.orbit-file-card-heading > span {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #4d7180;
+  border-radius: 9px;
+  background: #102e37;
+  color: #7be0df;
+  font-size: 18px;
+}
+
+.orbit-file-card-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.orbit-file-card-heading strong {
+  overflow: hidden;
+  color: #f0f7f8;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orbit-file-card-heading small,
+.orbit-file-card-footer > span,
+.orbit-file-progress small {
+  color: #9eb4c0;
+  font-size: 8px;
+}
+
+.orbit-file-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border: 1px solid #344d5c;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #07121d;
+}
+
+.orbit-file-audio {
+  width: 100%;
+  min-height: 36px;
+}
+
+.orbit-file-progress {
+  display: grid;
+  gap: 5px;
+}
+
+.orbit-file-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: #75dfe0;
+}
+
+.orbit-file-progress > span {
+  color: #ffc0ab;
+  font-size: 9px;
+}
+
+.orbit-file-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.orbit-file-card-footer > span {
+  flex: 1 1 100%;
+  text-transform: capitalize;
+}
+
+.orbit-file-privacy {
+  margin: 0;
+  color: #8196a3;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.orbit-composer-bottom .orbit-attach-action {
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.orbit-blocked-list {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid #334758;
+  border-radius: 9px;
+  background: #0c1824;
+}
+
+.orbit-blocked-list-heading,
+.orbit-blocked-contact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.orbit-blocked-list-heading strong,
+.orbit-blocked-contact strong {
+  color: #e4eef2;
+  font-size: 10px;
+}
+
+.orbit-blocked-list p,
+.orbit-blocked-contact small {
+  margin: 0;
+  color: #93a8b5;
+  font-size: 9px;
+}
+
+.orbit-blocked-list button,
+.orbit-blocked-contact button {
+  color: #8fe4e4;
+  font-size: 9px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.orbit-blocked-contact > span {
+  display: grid;
+  gap: 3px;
+}
+
+@media (max-width: 800px) {
+  .orbit-thread-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .orbit-thread-header {
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 4px 8px;
+  }
+
+  .orbit-thread-actions {
+    justify-content: flex-start;
+  }
+
+  .orbit-thread-actions button {
+    min-height: 29px;
+    padding: 0 8px;
+    font-size: 8px;
+  }
+
+  .orbit-file-card {
+    min-width: min(68vw, 290px);
+  }
+
+  .orbit-composer-bottom {
+    flex-wrap: wrap;
+  }
+
+  .orbit-composer-bottom > span {
+    width: 100%;
+  }
+}

@@ -55,6 +55,8 @@ export class ConversationsRepository {
       ciphertext: Uint8Array | null
       iv: Uint8Array | null
       key_version: number | null
+      sender_key_version: number | null
+      recipient_key_version: number | null
       kind: string | null
       created_at: Date | null
       unread_count: bigint
@@ -67,6 +69,8 @@ export class ConversationsRepository {
              latest.ciphertext,
              latest.iv,
              latest.key_version,
+             latest.sender_key_version,
+             latest.recipient_key_version,
              latest.kind,
              latest.created_at,
              (
@@ -83,7 +87,8 @@ export class ConversationsRepository {
         FROM conversations c
         LEFT JOIN LATERAL (
           SELECT id, sender_id, client_msg_id, seq, ciphertext, iv,
-                 key_version, kind, created_at
+                 key_version, sender_key_version, recipient_key_version,
+                 kind, created_at
             FROM messages
            WHERE conversation_id = c.id
            ORDER BY seq DESC
@@ -136,6 +141,8 @@ export class ConversationsRepository {
               ciphertext: Buffer.from(latest.ciphertext).toString("base64"),
               iv: Buffer.from(latest.iv).toString("base64"),
               keyVersion: latest.key_version,
+              senderKeyVersion: latest.sender_key_version,
+              recipientKeyVersion: latest.recipient_key_version,
               kind: latest.kind,
               createdAt: latest.created_at?.toISOString() ?? null,
             }

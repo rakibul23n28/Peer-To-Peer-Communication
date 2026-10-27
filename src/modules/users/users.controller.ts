@@ -40,10 +40,13 @@ export class UsersController {
     return { users: users.filter((user) => user.id !== request.userId) }
   }
 
-  publicKey(id: string) {
+  publicKey(id: string, version?: string) {
     z.string().uuid().parse(id)
+    const keyVersion = version === undefined
+      ? undefined
+      : z.coerce.number().int().positive().parse(version)
 
-    return this.users.publicKey(id)
+    return this.users.publicKey(id, keyVersion)
   }
 
   me(request: AuthRequest) {
@@ -82,6 +85,7 @@ Req()(usersController, "search", 1)
 Get(":id/public-key")(usersController, "publicKey", Object.getOwnPropertyDescriptor(usersController, "publicKey")!)
 UseGuards(AuthGuard)(usersController, "publicKey", Object.getOwnPropertyDescriptor(usersController, "publicKey")!)
 Param("id")(usersController, "publicKey", 0)
+Query("version")(usersController, "publicKey", 1)
 
 Get("me")(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)
 UseGuards(AuthGuard)(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)

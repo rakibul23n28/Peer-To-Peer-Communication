@@ -21,6 +21,10 @@ export interface FileOffer {
 
   keyVersion: number
 
+  senderKeyVersion?: number
+
+  recipientKeyVersion?: number
+
   nameEnc: Buffer
 
   nameIv: Buffer
@@ -96,11 +100,11 @@ export class FilesRepository {
 
           iv: prismaBytes(input.iv),
 
-          keyVersion: input.keyVersion,
+          keyVersion: input.senderKeyVersion ?? input.keyVersion,
 
-          senderKeyVersion: input.keyVersion,
+          senderKeyVersion: input.senderKeyVersion ?? input.keyVersion,
 
-          recipientKeyVersion: input.keyVersion,
+          recipientKeyVersion: input.recipientKeyVersion ?? input.keyVersion,
 
           kind: MessageKind.file,
         },
@@ -225,6 +229,14 @@ export class FilesRepository {
 
       select: { userA: true, userB: true },
     })
+  }
+
+  async offerSender(conversationId: string, fileId: string) {
+    const offer = await this.prisma.fileTransfer.findFirst({
+      where: { fileId, conversationId },
+      select: { senderId: true },
+    })
+    return offer?.senderId ?? null
   }
 }
 

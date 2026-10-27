@@ -22,7 +22,7 @@ export class UsersRepository {
     })
   }
 
-  async publicKey(userId: string) {
+  async publicKey(userId: string, keyVersion?: number) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
 
@@ -30,9 +30,11 @@ export class UsersRepository {
         id: true,
 
         keys: {
-          where: { revokedAt: null },
+          where: keyVersion === undefined
+            ? { revokedAt: null }
+            : { keyVersion },
 
-          select: { publicKey: true, fingerprint: true },
+          select: { publicKey: true, fingerprint: true, keyVersion: true },
 
           take: 1,
         },
@@ -49,6 +51,8 @@ export class UsersRepository {
       publicKey: Buffer.from(key.publicKey).toString("base64"),
 
       fingerprint: key.fingerprint,
+
+      keyVersion: key.keyVersion,
     }
   }
 }

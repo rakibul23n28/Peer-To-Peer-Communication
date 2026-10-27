@@ -22,6 +22,7 @@ import {
   type DeviceIdentity,
 } from './auth/keyStore';
 import './auth/auth.css';
+import './auth/chat.css';
 
 const AuthenticatedHome = lazy(() => import('./auth/AuthenticatedHome'));
 

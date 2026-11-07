@@ -67,6 +67,8 @@ export interface AuthenticatedIdentity {
   fingerprint: string
 
   keyVersion: number
+
+  keyAvailable: boolean
 }
 
 @Injectable()
@@ -232,7 +234,7 @@ export class AuthService {
       input.password,
     )
 
-    if (!user || !valid || !user.keys[0]) {
+    if (!user || !valid) {
       let maxFailures = 0
 
       for (const key of rateKeys) {
@@ -305,9 +307,10 @@ export class AuthService {
         user.id,
         user.username,
         user.displayName,
-        key.publicKey,
-        key.fingerprint,
-        key.keyVersion,
+        key?.publicKey ?? null,
+        key?.fingerprint ?? "",
+        key?.keyVersion ?? 0,
+        Boolean(key && !key.revokedAt),
       ),
     }
   }
@@ -371,15 +374,16 @@ export class AuthService {
 
     const key = user?.keys[0]
 
-    if (!user || !key) throw unauthorized()
+    if (!user) throw unauthorized()
 
     return mapIdentity(
       user.id,
       user.username,
       user.displayName,
-      key.publicKey,
-      key.fingerprint,
-      key.keyVersion,
+      key?.publicKey ?? null,
+      key?.fingerprint ?? "",
+      key?.keyVersion ?? 0,
+      Boolean(key && !key.revokedAt),
     )
   }
 
@@ -526,11 +530,12 @@ function mapIdentity(
 
   displayName: string,
 
-  publicKey: Uint8Array,
+  publicKey: Uint8Array | null,
 
   keyFingerprint: string,
 
   keyVersion: number,
+  keyAvailable = true,
 ): AuthenticatedIdentity {
   return {
     id,
@@ -539,10 +544,12 @@ function mapIdentity(
 
     displayName,
 
-    publicKey: Buffer.from(publicKey).toString("base64"),
+    publicKey: publicKey ? Buffer.from(publicKey).toString("base64") : "",
 
     fingerprint: keyFingerprint,
 
     keyVersion,
+
+    keyAvailable,
   }
 }

@@ -43,7 +43,7 @@ import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
 import { WorkspaceDetails } from './components/WorkspaceDetails';
 
 type WorkspaceTheme = 'dark' | 'light';
-type WorkspaceDensity = 'comfortable' | 'compact';
+type WorkspaceMessageLayout = 'list' | 'bubbles';
 
 function readWorkspacePreference(key: string, fallback: string): string {
   try {
@@ -51,11 +51,6 @@ function readWorkspacePreference(key: string, fallback: string): string {
   } catch {
     return fallback;
   }
-}
-
-function readWorkspaceWidth(key: string, fallback: number, min: number, max: number): number {
-  const saved = Number(readWorkspacePreference(key, String(fallback)));
-  return Number.isFinite(saved) ? Math.min(max, Math.max(min, saved)) : fallback;
 }
 
 interface AuthenticatedHomeProps {
@@ -207,6 +202,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [searching, setSearching] = useState(false);
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
+  const [refreshingPeerKey, setRefreshingPeerKey] = useState(false);
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
   const [threadError, setThreadError] = useState('');
   const [navigationCollapsed, setNavigationCollapsed] = useState(
@@ -214,23 +210,17 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   );
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [workspaceTheme, setWorkspaceTheme] = useState<WorkspaceTheme>(
-    () => readWorkspacePreference('orbit-theme', 'dark') === 'light' ? 'light' : 'dark',
+    () => readWorkspacePreference('orbit-theme', 'light') === 'dark' ? 'dark' : 'light',
   );
-  const [workspaceDensity, setWorkspaceDensity] = useState<WorkspaceDensity>(
-    () => readWorkspacePreference('orbit-density', 'comfortable') === 'compact' ? 'compact' : 'comfortable',
-  );
-  const [sidebarWidth, setSidebarWidth] = useState(
-    () => readWorkspaceWidth('orbit-sidebar-width', 270, 220, 360),
-  );
-  const [detailsWidth, setDetailsWidth] = useState(
-    () => readWorkspaceWidth('orbit-details-width', 310, 260, 400),
+  const [workspaceMessageLayout, setWorkspaceMessageLayout] = useState<WorkspaceMessageLayout>(
+    () => readWorkspacePreference('orbit-message-layout', 'list') === 'bubbles' ? 'bubbles' : 'list',
   );
   const workspaceLayoutStyle: CSSProperties & Record<
     '--orbit-sidebar-width' | '--orbit-details-width',
     string
   > = {
-    '--orbit-sidebar-width': `${navigationCollapsed ? 72 : sidebarWidth}px`,
-    '--orbit-details-width': `${selectedId && detailsOpen ? detailsWidth : 0}px`,
+    '--orbit-sidebar-width': `${navigationCollapsed ? 72 : 270}px`,
+    '--orbit-details-width': `${selectedId && detailsOpen ? 310 : 0}px`,
   };
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -464,9 +454,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     for (const [key, value] of [
       ['orbit-navigation-collapsed', String(navigationCollapsed)],
       ['orbit-theme', workspaceTheme],
-      ['orbit-density', workspaceDensity],
-      ['orbit-sidebar-width', String(sidebarWidth)],
-      ['orbit-details-width', String(detailsWidth)],
+      ['orbit-message-layout', workspaceMessageLayout],
     ]) {
       try {
         localStorage.setItem(key, value);
@@ -475,7 +463,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         break;
       }
     }
-  }, [detailsWidth, navigationCollapsed, sidebarWidth, workspaceDensity, workspaceTheme]);
+  }, [navigationCollapsed, workspaceMessageLayout, workspaceTheme]);
 
   useEffect(() => {
     if (!detailsOpen) return;
@@ -512,6 +500,26 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       setLoadingConversations(false);
     }
   }, [user.id]);
+
+  async function refreshPeerKey() {
+    if (!selected || refreshingPeerKey) return;
+    setRefreshingPeerKey(true);
+    setActionError('');
+    try {
+      const response = await getConversations();
+      setConversations(response.conversations);
+      const refreshed = response.conversations.find(({ id }) => id === selected.id);
+      if (refreshed?.peer.keyAvailable) {
+        setNotice(`${refreshed.peer.displayName}'s encryption key is available.`);
+      } else {
+        setNotice(`${selected.peer.displayName}'s key is still unavailable. Ask them to sign in and restore it.`);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not refresh the contact encryption key.');
+    } finally {
+      setRefreshingPeerKey(false);
+    }
+  }
 
   function selectConversation(conversationId: string) {
     setSelectedId(conversationId);
@@ -1118,6 +1126,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   useEffect(() => {
     if (connection !== 'connected' || !selected) return;
     void refreshThread();
+    if (!selected.peer.keyAvailable) return;
     const storageKey = `orbit-outbox:${user.id}`;
     try {
       const queue = readOutbox(storageKey);
@@ -1137,6 +1146,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       }
       for (const item of next) {
         if (
+          !selected.peer.keyAvailable ||
           flushingMessagesRef.current.has(item.clientMsgId) ||
           attemptedMessagesRef.current.has(item.clientMsgId)
         ) continue;
@@ -1211,7 +1221,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   async function sendTextMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const plaintext = draft.trim();
-    if (!plaintext || !selected || !deviceIdentity || sending || peerBlocked) return;
+    if (!plaintext || !selected || !deviceIdentity || sending || peerBlocked || !selected.peer.keyAvailable) return;
     setSending(true);
     setThreadError('');
     try {
@@ -1274,7 +1284,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   async function editTextMessage(item: ThreadMessage) {
-    if (!selected || !deviceIdentity || !editDraft.trim()) return;
+    if (!selected || !deviceIdentity || !selected.peer.keyAvailable || !editDraft.trim()) return;
     try {
       const encrypted = await encryptMessage(deviceIdentity, selected, editDraft.trim());
       await editMessage(selected.id, item.id, { ...encrypted, keyVersion: user.keyVersion });
@@ -1297,7 +1307,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   async function reactToMessage(item: ThreadMessage, reaction: string) {
-    if (!selected || !deviceIdentity) return;
+    if (!selected || !deviceIdentity || !selected.peer.keyAvailable) return;
     try {
       const alreadyReacted = item.decryptedReactions.some(
         (entry) => entry.userId === user.id && entry.value === reaction,
@@ -1400,7 +1410,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   async function offerFile(file: File) {
-    if (!selected || !deviceIdentity || fileSending || peerBlocked) return;
+    if (!selected || !deviceIdentity || fileSending || peerBlocked || !selected.peer.keyAvailable) return;
     setFileSending(true);
     setThreadError('');
     try {
@@ -1645,7 +1655,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   return <main
     className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}${navigationCollapsed ? ' is-navigation-collapsed' : ''}`}
     data-theme={workspaceTheme}
-    data-density={workspaceDensity}
+    data-message-layout={workspaceMessageLayout}
     style={workspaceLayoutStyle}
   >
     <ConversationSidebar
@@ -1703,13 +1713,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         hasOlderMessages={hasOlderMessages}
         loadingOlderMessages={loadingOlderMessages}
         detailsOpen={detailsOpen}
-        audioCallDisabled={Boolean(audioCall) || !deviceIdentity || peerBlocked || connection !== 'connected'}
+        audioCallDisabled={Boolean(audioCall) || !deviceIdentity || !selected.peer.keyAvailable || peerBlocked || connection !== 'connected'}
         audioCallLabel={audioCall
           ? audioCall.peerId === selected.peer.id ? 'Call in progress' : 'Another call is active'
           : 'Start audio call'}
         onBack={() => setSelectedId(null)}
         onToggleNavigation={() => setNavigationCollapsed((collapsed) => !collapsed)}
         onToggleDetails={() => setDetailsOpen((open) => !open)}
+        onRefreshPeerKey={() => void refreshPeerKey()}
+        refreshingPeerKey={refreshingPeerKey}
         onStartAudioCall={() => void startAudioCall()}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
@@ -1759,13 +1771,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         user={user}
         messages={threadMessages}
         theme={workspaceTheme}
-        density={workspaceDensity}
-        sidebarWidth={sidebarWidth}
-        panelWidth={detailsWidth}
+        messageLayout={workspaceMessageLayout}
         onThemeChange={setWorkspaceTheme}
-        onDensityChange={setWorkspaceDensity}
-        onSidebarWidthChange={setSidebarWidth}
-        onPanelWidthChange={setDetailsWidth}
+        onMessageLayoutChange={setWorkspaceMessageLayout}
         onClose={() => setDetailsOpen(false)}
         onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
         onJumpToMessage={(id) => {

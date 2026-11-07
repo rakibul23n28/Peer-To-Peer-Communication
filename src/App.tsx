@@ -34,9 +34,9 @@ type AuthMode = 'login' | 'register';
 
 function OrbitMark({ className = '' }: { className?: string }) {
   return <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-    <circle cx="24" cy="24" r="4" fill="currentColor" />
-    <ellipse cx="24" cy="24" rx="18" ry="8" transform="rotate(-34 24 24)" stroke="currentColor" strokeWidth="1.5" />
-    <circle cx="38.5" cy="14" r="2.5" fill="currentColor" />
+    <path d="M24 39c-7-8-10-15-9-21 1-7 7-11 13-9 7 2 10 10 6 17-2 5-6 9-10 13Z" fill="currentColor" fillOpacity=".2" stroke="currentColor" strokeWidth="2" />
+    <path d="M24 37c-1-9 1-16 7-22M23 27l-7-6m8 10 9-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <circle cx="33" cy="10" r="3" fill="currentColor" />
   </svg>;
 }
 
@@ -44,21 +44,23 @@ function AuthStory() {
   return <aside className="auth-story" aria-label="Orbit introduction">
     <div className="story-topline"><span className="story-brand"><OrbitMark /> orbit<span>.</span></span><span className="story-edition">PRIVATE BY DESIGN / 01</span></div>
     <div className="story-visual" aria-hidden="true">
-      <div className="story-halo story-halo--outer" />
-      <div className="story-halo story-halo--middle" />
-      <div className="story-halo story-halo--inner" />
-      <div className="story-core"><OrbitMark /></div>
-      <span className="story-satellite story-satellite--one" />
-      <span className="story-satellite story-satellite--two" />
-      <span className="story-coordinate">41° 24′ 12.2″ N</span>
-      <span className="story-coordinate story-coordinate--right">SECURE / ALWAYS</span>
+      <span className="story-sun" />
+      <span className="story-cloud story-cloud--one" />
+      <span className="story-cloud story-cloud--two" />
+      <span className="story-hill story-hill--back" />
+      <span className="story-hill story-hill--front" />
+      <span className="story-cottage"><i /><b /></span>
+      <span className="story-tree story-tree--one"><i /></span>
+      <span className="story-tree story-tree--two"><i /></span>
+      <span className="story-firefly story-firefly--one" />
+      <span className="story-firefly story-firefly--two" />
     </div>
     <div className="story-copy">
-      <p className="eyebrow"><span /> YOUR PEOPLE, IN YOUR ORBIT</p>
-      <h2>Closer, without the noise.</h2>
-      <p>A quieter place for your conversations. Your keys stay yours; your messages stay private.</p>
+      <p className="eyebrow"><span /> A LITTLE WORLD OF YOUR OWN</p>
+      <h2>Good things grow together.</h2>
+      <p>A calm, private corner for the people who make your days brighter. Your keys stay yours; your messages stay private.</p>
     </div>
-    <div className="story-footer"><span>END-TO-END ENCRYPTED</span><span>BUILT FOR REAL CONNECTION</span></div>
+    <div className="story-footer"><span>PRIVATE BY NATURE</span><span>MADE FOR YOUR PEOPLE</span></div>
   </aside>;
 }
 
@@ -122,6 +124,22 @@ export default function App() {
     } catch {
       setPendingUser(identity);
       setMessage('This browser could not read its saved key. Check site storage permissions or continue through explicit key recovery.');
+      setPhase('key-recovery');
+      return false;
+    }
+    if (!identity.keyAvailable || !identity.publicKey) {
+      if (local && identity.fingerprint && local.fingerprint === identity.fingerprint) {
+        await replacePublicKey(local.publicKeyBase64);
+        const restoredIdentity = await getMe();
+        if (!restoredIdentity.keyAvailable || restoredIdentity.fingerprint !== local.fingerprint) {
+          throw new Error('The saved encryption key could not be restored to this account.');
+        }
+        await saveDeviceIdentity({ ...local, keyVersion: restoredIdentity.keyVersion });
+        setUser(restoredIdentity);
+        setPhase('signed-in');
+        return true;
+      }
+      setPendingUser(identity);
       setPhase('key-recovery');
       return false;
     }
@@ -305,7 +323,7 @@ export default function App() {
     try {
       const previousIdentity = await getDeviceIdentity(pendingUser.id);
       if (previousIdentity && previousIdentity.fingerprint !== pendingUser.fingerprint) {
-        for (let keyVersion = 1; keyVersion < pendingUser.keyVersion; keyVersion += 1) {
+        for (let keyVersion = 1; keyVersion <= pendingUser.keyVersion; keyVersion += 1) {
           try {
             const previousKey = await getUserPublicKey(pendingUser.id, keyVersion);
             if (previousKey.fingerprint === previousIdentity.fingerprint) {
@@ -436,8 +454,10 @@ export default function App() {
   if (phase === 'key-recovery' && pendingUser) {
     return <main className="auth-screen auth-screen--recovery"><AuthStory /><section className="auth-card" aria-labelledby="recovery-title">
       <span className="eyebrow">DEVICE IDENTITY / ACTION REQUIRED</span>
-      <h1 id="recovery-title">This device has a different key.</h1>
-      <p>Creating a new key means messages encrypted to your previous key may not be readable here. Replacing it changes your security identity.</p>
+      <h1 id="recovery-title">{pendingUser.keyAvailable ? 'This device has a different key.' : 'Restore your encryption key.'}</h1>
+      <p>{pendingUser.keyAvailable
+        ? 'Creating a new key means messages encrypted to your previous key may not be readable here. Replacing it changes your security identity.'
+        : "No active encryption key is registered for this account, and the saved key on this browser does not match the account's last registered key. Creating a replacement changes your security identity; previous messages may not be readable unless their old key is saved here."}</p>
       <p className="form-warning">Only continue if you understand the impact. Key-change notices to contacts are not available yet.</p>
       {message && <p className="form-message" role="alert">{message}</p>}
       <button className="primary-button" disabled={isBusy} onClick={() => void handleKeyRecovery()}>{isBusy ? 'Securing this device…' : 'Create a new device key'}</button>

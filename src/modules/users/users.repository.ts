@@ -34,6 +34,7 @@ export class UsersRepository {
             ? { revokedAt: null }
             : { keyVersion },
 
+          orderBy: { keyVersion: "desc" },
           select: { publicKey: true, fingerprint: true, keyVersion: true },
 
           take: 1,

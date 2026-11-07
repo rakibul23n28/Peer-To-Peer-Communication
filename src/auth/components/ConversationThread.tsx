@@ -22,6 +22,7 @@ interface ConversationThreadProps {
   connection: OrbitConnectionState;
   deviceIdentityAvailable: boolean;
   peerBlocked: boolean;
+  refreshingPeerKey: boolean;
   fileSending: boolean;
   filePickerRef: RefObject<HTMLInputElement | null>;
   threadMessages: ThreadMessage[];
@@ -43,6 +44,7 @@ interface ConversationThreadProps {
   onBack: () => void;
   onToggleNavigation: () => void;
   onToggleDetails: () => void;
+  onRefreshPeerKey: () => void;
   onStartAudioCall: () => void;
   onBlock: () => void;
   onUnblock: () => void;
@@ -95,6 +97,7 @@ export function ConversationThread({
   connection,
   deviceIdentityAvailable,
   peerBlocked,
+  refreshingPeerKey,
   fileSending,
   filePickerRef,
   threadMessages,
@@ -116,6 +119,7 @@ export function ConversationThread({
   onBack,
   onToggleNavigation,
   onToggleDetails,
+  onRefreshPeerKey,
   onStartAudioCall,
   onBlock,
   onUnblock,
@@ -179,6 +183,12 @@ export function ConversationThread({
     {peerBlocked && <div className="orbit-blocked-banner" role="status">
       You blocked @{conversation.peer.username}. Messages and file sharing are disabled.
       <button type="button" onClick={onUnblock}>Unblock</button>
+    </div>}
+    {!conversation.peer.keyAvailable && <div className="orbit-key-warning" role="status">
+      <span><strong>Encryption key unavailable.</strong> Ask @{conversation.peer.username} to sign in and restore their device key, then refresh.</span>
+      <button type="button" disabled={refreshingPeerKey} onClick={onRefreshPeerKey}>
+        {refreshingPeerKey ? 'Checking…' : 'Refresh key'}
+      </button>
     </div>}
     <section ref={messageListRef} className="orbit-message-list" aria-label="Encrypted messages" aria-live="polite" onScroll={(event) => {
       const element = event.currentTarget;
@@ -303,6 +313,7 @@ export function ConversationThread({
               {reactionGroups.map((reaction) => <button
                 className={`orbit-reaction-pill${reaction.mine ? ' is-mine' : ''}`}
                 type="button"
+                disabled={!conversation.peer.keyAvailable}
                 key={reaction.value}
                 aria-pressed={reaction.mine}
                 aria-label={`${reaction.value}, ${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}${reaction.mine ? ', yours' : ''}`}
@@ -315,11 +326,11 @@ export function ConversationThread({
             </div>}
             {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
               <span>{item.sendError ?? 'Could not send this message.'}</span>
-              <button type="button" onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
+              <button type="button" disabled={!conversation.peer.keyAvailable} onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
             </div>}
             {!item.deletedAt && <div className="orbit-message-actions" aria-label="Message actions">
               {item.senderId === user.id && !item.sendState && <>
-                <button type="button" title="Edit message" aria-label="Edit message" onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
+                <button type="button" title="Edit message" aria-label="Edit message" disabled={!conversation.peer.keyAvailable} onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
                 <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
               </>}
               <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
@@ -342,7 +353,7 @@ export function ConversationThread({
         event.currentTarget.value = '';
       }} />
       {replyTo && <div className="orbit-replying">Replying to {threadMessages.find((item) => item.id === replyTo)?.plaintext.slice(0, 80) ?? 'message'}<button type="button" onClick={() => onReplyChange(null)} aria-label="Cancel reply"><OrbitIcon name="close" size={15} /></button></div>}
-      <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={8000} aria-label="Message" placeholder={peerBlocked ? 'Unblock this contact to send messages…' : deviceIdentityAvailable ? 'Write an encrypted message…' : 'Loading your device key…'} disabled={!deviceIdentityAvailable || peerBlocked} onKeyDown={(event) => {
+      <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={8000} aria-label="Message" placeholder={peerBlocked ? 'Unblock this contact to send messages…' : !conversation.peer.keyAvailable ? "Waiting for your contact's encryption key…" : deviceIdentityAvailable ? 'Write an encrypted message…' : 'Loading your device key…'} disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked} onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           event.currentTarget.form?.requestSubmit();
@@ -350,11 +361,11 @@ export function ConversationThread({
       }} />
       <div className="orbit-composer-bottom">
         <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'End-to-end encrypted · Enter to send'}</span>
-        {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected'} onClick={onRetryAllQueued}>Retry queued</button>}
-        <button className="orbit-attach-action" type="button" title="Attach a file or media" disabled={!deviceIdentityAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()} aria-label="Attach a file or media">
+        {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected' || !conversation.peer.keyAvailable} onClick={onRetryAllQueued}>Retry queued</button>}
+        <button className="orbit-attach-action" type="button" title="Attach a file or media" disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()} aria-label="Attach a file or media">
           <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing…' : 'Attach file'}</span>
         </button>
-        <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentityAvailable || peerBlocked}>
+        <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked}>
           <span className="orbit-button-text">{sending ? 'Sending…' : 'Send'}</span><OrbitIcon name="send" size={16}  />
         </button>
       </div>

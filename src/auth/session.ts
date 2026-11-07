@@ -20,6 +20,8 @@ export interface UserIdentity {
   fingerprint: string
 
   keyVersion: number
+
+  keyAvailable: boolean
 }
 
 export interface ConversationSummary {

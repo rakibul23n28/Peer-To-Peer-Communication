@@ -15,6 +15,7 @@ const publicUserSelection = {
 
   keys: {
     where: { revokedAt: null },
+    orderBy: { keyVersion: "desc" },
     take: 1,
     select: { publicKey: true, fingerprint: true, keyVersion: true },
   },
@@ -128,6 +129,8 @@ export class ConversationsRepository {
           fingerprint: key?.fingerprint ?? "",
 
           keyVersion: key?.keyVersion ?? 0,
+
+          keyAvailable: Boolean(key),
         },
 
         unreadCount: Number(latest?.unread_count ?? 0),

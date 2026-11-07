@@ -5,20 +5,16 @@ import { OrbitIcon } from './OrbitIcon';
 import { initials } from './OrbitMark';
 
 type Theme = 'dark' | 'light';
-type Density = 'comfortable' | 'compact';
+type MessageLayout = 'list' | 'bubbles';
 
 interface WorkspaceDetailsProps {
   conversation: ConversationSummary;
   user: UserIdentity;
   messages: ThreadMessage[];
   theme: Theme;
-  density: Density;
-  sidebarWidth: number;
-  panelWidth: number;
+  messageLayout: MessageLayout;
   onThemeChange: (theme: Theme) => void;
-  onDensityChange: (density: Density) => void;
-  onSidebarWidthChange: (width: number) => void;
-  onPanelWidthChange: (width: number) => void;
+  onMessageLayoutChange: (layout: MessageLayout) => void;
   onClose: () => void;
   onCopyFingerprint: () => void;
   onJumpToMessage: (id: string) => void;
@@ -38,13 +34,9 @@ export function WorkspaceDetails({
   user,
   messages,
   theme,
-  density,
-  sidebarWidth,
-  panelWidth,
+  messageLayout,
   onThemeChange,
-  onDensityChange,
-  onSidebarWidthChange,
-  onPanelWidthChange,
+  onMessageLayoutChange,
   onClose,
   onCopyFingerprint,
   onJumpToMessage,
@@ -78,10 +70,13 @@ export function WorkspaceDetails({
         <span className="orbit-avatar orbit-details-avatar">{initials(conversation.peer.displayName)}</span>
         <h3>{conversation.peer.displayName}</h3>
         <p>@{conversation.peer.username}</p>
-        <span className={`orbit-details-status${conversation.peer.publicKey ? ' is-secure' : ''}`}>
+        <span className={`orbit-details-status${conversation.peer.keyAvailable ? ' is-secure' : ''}`}>
           <OrbitIcon name="shield" size={14} />
-          {conversation.peer.publicKey ? 'Encrypted conversation' : 'Encryption key unavailable'}
+          {conversation.peer.keyAvailable ? 'Encrypted conversation' : 'Encryption key unavailable'}
         </span>
+        {!conversation.peer.keyAvailable && <p className="orbit-details-hint">
+          This contact needs to sign in to restore their device key. Refresh this conversation afterward.
+        </p>}
       </section>
 
       <section className="orbit-details-section" aria-labelledby="orbit-search-title">
@@ -126,20 +121,12 @@ export function WorkspaceDetails({
           </div>
         </div>
         <div className="orbit-choice-row">
-          <span>Message density</span>
-          <div className="orbit-segmented-control" role="group" aria-label="Message density">
-            <button type="button" aria-pressed={density === 'comfortable'} onClick={() => onDensityChange('comfortable')}>Comfort</button>
-            <button type="button" aria-pressed={density === 'compact'} onClick={() => onDensityChange('compact')}>Compact</button>
+          <span>Message layout</span>
+          <div className="orbit-segmented-control" role="group" aria-label="Message layout">
+            <button type="button" aria-pressed={messageLayout === 'list'} onClick={() => onMessageLayoutChange('list')}>List</button>
+            <button type="button" aria-pressed={messageLayout === 'bubbles'} onClick={() => onMessageLayoutChange('bubbles')}>Bubbles</button>
           </div>
         </div>
-        <label className="orbit-range-control">
-          <span>Navigation width <output>{sidebarWidth}px</output></span>
-          <input type="range" min="220" max="360" step="10" value={sidebarWidth} onChange={(event) => onSidebarWidthChange(Number(event.target.value))} />
-        </label>
-        <label className="orbit-range-control">
-          <span>Details width <output>{panelWidth}px</output></span>
-          <input type="range" min="260" max="400" step="10" value={panelWidth} onChange={(event) => onPanelWidthChange(Number(event.target.value))} />
-        </label>
       </section>
     </div>
   </aside>;

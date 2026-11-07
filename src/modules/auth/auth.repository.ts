@@ -38,7 +38,7 @@ export class AuthRepository {
     return this.prisma.user.findFirst({
       where: { username, deletedAt: null },
 
-      include: { keys: { where: { revokedAt: null }, take: 1 } },
+      include: { keys: { orderBy: { keyVersion: "desc" }, take: 1 } },
     })
   }
 
@@ -220,7 +220,7 @@ export class AuthRepository {
     return this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
 
-      include: { keys: { where: { revokedAt: null }, take: 1 } },
+      include: { keys: { orderBy: { keyVersion: "desc" }, take: 1 } },
     })
   }
 

@@ -515,17 +515,26 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
 
     const decryptedReactions = await Promise.all(item.reactions.map(async (reaction) => {
-      if (!peerPublicKey) return null;
       try {
+        const ownReaction = reaction.userId === user.id;
+        const localKeyVersion = decryptionIdentity.keyVersion ?? user.keyVersion;
+        const senderKeyVersion = ownReaction ? localKeyVersion : conversation.peer.keyVersion;
+        const recipientKeyVersion = ownReaction ? conversation.peer.keyVersion : localKeyVersion;
+        const decrypted = await decryptWithAvailableKeyVersions(
+          identity,
+          conversation,
+          {
+            senderId: reaction.userId,
+            senderKeyVersion,
+            recipientKeyVersion,
+            keyVersion: senderKeyVersion,
+          },
+          reaction.reactionEnc,
+          reaction.iv,
+        );
         return {
           userId: reaction.userId,
-          value: await decryptMessage(
-            decryptionIdentity,
-            conversation,
-            reaction.reactionEnc,
-            reaction.iv,
-            peerPublicKey,
-          ),
+          value: decrypted.plaintext,
         };
       } catch {
         return null;
@@ -562,7 +571,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       },
       textDecrypted: Boolean(!item.deletedAt && item.ciphertext && item.iv && !decryptionError),
     };
-  })), [decryptWithAvailableKeyVersions, user.id]);
+  })), [decryptWithAvailableKeyVersions, user.id, user.keyVersion]);
 
   const refreshThread = useCallback(async () => {
     const conversation = conversationsRef.current.find(({ id }) => id === selectedId);

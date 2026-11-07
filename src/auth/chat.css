@@ -359,7 +359,40 @@
     radial-gradient(ellipse at 100% 0, #f3bb6a12, transparent 56%),
     linear-gradient(145deg, #342c25f5, #241f22f8 82%);
   box-shadow: 0 10px 28px #00000020, inset 0 1px #ffe2b312, 0 0 22px #ecaa6508;
-  animation: orbit-message-arrive .24s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.orbit-message.is-sending {
+  border-color: #59d7be92;
+  background:
+    radial-gradient(ellipse at 100% 0, #6de6cf20, transparent 62%),
+    linear-gradient(145deg, #173b3df5, #142c35f8 82%);
+  box-shadow: 0 10px 32px #00000028, inset 0 1px #b6fff01a, 0 0 26px #56d9c51a;
+  animation: orbit-message-arrive .24s cubic-bezier(.2, .8, .2, 1) both, orbit-message-sending 1.8s ease-in-out infinite;
+}
+
+.orbit-message.is-queued {
+  border-style: dashed;
+  border-color: #b8a4d66b;
+  background: linear-gradient(145deg, #292a3af2, #202431f8);
+}
+
+.orbit-message.is-failed {
+  border-color: #f08e7890;
+  background:
+    radial-gradient(ellipse at 100% 0, #f08e7818, transparent 62%),
+    linear-gradient(145deg, #39252af5, #281e27f8 82%);
+}
+
+.orbit-message.is-sending .orbit-message-status {
+  color: #72e3cc;
+}
+
+.orbit-message.is-queued .orbit-message-status {
+  color: #c1a9e7;
+}
+
+.orbit-message.is-failed .orbit-message-status {
+  color: #ff9587;
 }
 
 .orbit-message.is-own::after,
@@ -401,6 +434,58 @@
 
 .orbit-message-status:has(.orbit-visually-hidden) {
   gap: 4px;
+}
+
+.orbit-reaction-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.orbit-reaction-pill {
+  display: inline-flex;
+  min-width: 33px;
+  min-height: 25px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid #ffffff19;
+  border-radius: 999px;
+  background: #0c171cc7;
+  color: #c7d7d1;
+  font-size: 11px;
+  line-height: 1;
+  transition: .16s ease;
+}
+
+.orbit-reaction-pill > svg {
+  color: #ff8a86;
+}
+
+.orbit-reaction-pill > span:last-child {
+  color: #b2c2bd;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.orbit-reaction-pill:hover,
+.orbit-reaction-pill:focus-visible {
+  border-color: #ff8a8666;
+  background: #ff777816;
+  color: #ffe4df;
+}
+
+.orbit-reaction-pill.is-mine {
+  border-color: #ff7e7c77;
+  background: linear-gradient(135deg, #ff777821, #ff9a7012);
+  color: #ff9994;
+  box-shadow: 0 0 13px #fa777713;
+}
+
+.orbit-reaction-pill.is-mine > svg {
+  fill: currentColor;
 }
 
 .orbit-sending-indicator {
@@ -752,15 +837,16 @@
   gap: 8px;
   padding: 0 11px;
   border-radius: 9px;
-  background: linear-gradient(120deg, #ffd394, #e8ad61);
-  color: #271a0d;
+  background: linear-gradient(120deg, #71dfc9, #44bcae);
+  color: #092522;
   font-weight: 700;
-  box-shadow: 0 5px 18px #d3914330;
+  box-shadow: 0 5px 18px #44bcae35;
 }
 
 .orbit-composer-bottom .orbit-primary-action:hover:not(:disabled) {
   filter: brightness(1.06);
   transform: translateY(-1px);
+  box-shadow: 0 7px 22px #44bcae45;
 }
 
 .orbit-composer-bottom .orbit-primary-action:disabled {
@@ -948,6 +1034,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .orbit-message.is-sending {
+    animation: none;
+  }
   .orbit-conversation,
   .orbit-thread-back,
   .orbit-thread-actions button,

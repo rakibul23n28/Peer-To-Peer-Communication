@@ -169,9 +169,19 @@ export function ConversationThread({
         const currentDay = new Date(item.createdAt).toDateString();
         const showDay = currentDay !== previousDay;
         previousDay = currentDay;
+        const reactionGroups = item.decryptedReactions.reduce<Array<{ value: string; count: number; mine: boolean }>>((groups, reaction) => {
+          const group = groups.find(({ value }) => value === reaction.value);
+          if (group) {
+            group.count += 1;
+            group.mine ||= reaction.userId === user.id;
+          } else {
+            groups.push({ value: reaction.value, count: 1, mine: reaction.userId === user.id });
+          }
+          return groups;
+        }, []);
         return <div className="orbit-message-row" key={item.id}>
           {showDay && <div className="orbit-day-divider"><span>{dayLabel(item.createdAt)}</span></div>}
-          <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}${item.kind === 'file' ? ' is-file-message' : ''}`}>
+          <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}${item.sendState ? ` is-${item.sendState}` : ''}${item.kind === 'file' ? ' is-file-message' : ''}`}>
             {item.replyToId && <span className="orbit-reply-caption">REPLY TO / {item.replyToId.slice(0, 8)}</span>}
             {item.kind === 'file' && item.file ? <div className="orbit-file-card">
               <div className="orbit-file-card-heading">
@@ -247,11 +257,11 @@ export function ConversationThread({
               {item.decryptionError ? 'Encrypted message · key unavailable on this device' : item.plaintext}
             </p>}
             <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
-              {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' || item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
+              {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' ? 'Queued' : item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
                 {item.sendState === 'failed'
                   ? <><OrbitIcon name="close" size={13} /><span className="orbit-visually-hidden">Could not send</span></>
                   : item.sendState === 'queued' || item.sendState === 'sending'
-                    ? <><span className="orbit-sending-indicator" /><span className="orbit-visually-hidden">Sending</span></>
+                    ? <><span className="orbit-sending-indicator" /><span className="orbit-visually-hidden">{item.sendState === 'queued' ? 'Queued' : 'Sending'}</span></>
                     : item.receipts.some((entry) => entry.status === 'read')
                       ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Seen</span></>
                       : item.receipts.some((entry) => entry.status === 'delivered')
@@ -259,6 +269,20 @@ export function ConversationThread({
                         : <><OrbitIcon name="check" size={14} /><span className="orbit-visually-hidden">Sent</span></>}
               </span>}
             </footer>
+            {reactionGroups.length > 0 && <div className="orbit-reaction-list" aria-label="Message reactions">
+              {reactionGroups.map((reaction) => <button
+                className={`orbit-reaction-pill${reaction.mine ? ' is-mine' : ''}`}
+                type="button"
+                key={reaction.value}
+                aria-pressed={reaction.mine}
+                aria-label={`${reaction.value}, ${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}${reaction.mine ? ', yours' : ''}`}
+                title={reaction.mine ? 'Remove your reaction' : 'React with ' + reaction.value}
+                onClick={() => onReact(item, reaction.value)}
+              >
+                {reaction.value === '❤️' ? <OrbitIcon name="heart" size={13} /> : <span>{reaction.value}</span>}
+                <span>{reaction.count}</span>
+              </button>)}
+            </div>}
             {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
               <span>{item.sendError ?? 'Could not send this message.'}</span>
               <button type="button" onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
@@ -301,7 +325,7 @@ export function ConversationThread({
           <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing…' : 'Attach file'}</span>
         </button>
         <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentityAvailable || peerBlocked}>
-          <span>{sending ? 'Sending…' : 'Send'}</span><OrbitIcon name="send" size={16} />
+          <span className="orbit-button-text">{sending ? 'Sending…' : 'Send'}</span><OrbitIcon name="send" size={16}  />
         </button>
       </div>
     </form>

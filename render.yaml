@@ -2,6 +2,7 @@ services:
   - type: web
     name: orbit-api
     runtime: node
+    plan: free
     buildCommand: npm ci --include=dev && npm run prisma:generate && npm run build:server && npm run db:migrate:deploy
     startCommand: npm run start:server
     healthCheckPath: /health

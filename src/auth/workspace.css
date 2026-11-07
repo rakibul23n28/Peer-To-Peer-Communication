@@ -4376,7 +4376,7 @@
 }
 
 .orbit-shell[data-appearance='minimal'] .orbit-message-list {
-  gap: 0;
+  gap: 5px;
   padding-inline: clamp(10px, 2.5vw, 30px);
   background: linear-gradient(90deg, #f8faf6 0%, #f1f3ef 50%, #f8faf6 100%);
 }
@@ -4547,6 +4547,65 @@
   }
 }
 
+.orbit-blocked-banner {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 0;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 4px 6px 4px 9px;
+  border: 1px solid #d5b082;
+  border-radius: 999px;
+  background: #fbf0d9;
+  color: #6d5943;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.orbit-blocked-banner > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orbit-blocked-banner button {
+  min-height: 25px;
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid #c9aa7a;
+  border-radius: 999px;
+  background: #fffaf0;
+  color: #665239;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.orbit-blocked-banner button:hover,
+.orbit-blocked-banner button:focus-visible {
+  border-color: #9c7d4d;
+  background: #f3e5c7;
+}
+
+@media (max-width: 680px) {
+  .orbit-blocked-banner {
+    max-width: 100%;
+    gap: 5px;
+    padding: 3px 4px 3px 8px;
+    font-size: 9px;
+  }
+
+  .orbit-blocked-banner button {
+    min-height: 25px;
+    padding-inline: 8px;
+  }
+}
+
 .orbit-appearance-picker {
   min-width: 0;
   margin: 0;
@@ -4658,12 +4717,9 @@
   right: 3%;
   width: 132px;
   height: 170px;
-  opacity: .14;
+  opacity: .1;
   background:
-    radial-gradient(ellipse at 50% 17%, #547d50 0 18%, transparent 19%),
-    radial-gradient(ellipse at 27% 32%, #648d58 0 18%, transparent 19%),
-    radial-gradient(ellipse at 73% 32%, #648d58 0 18%, transparent 19%),
-    radial-gradient(ellipse at 50% 46%, #789a62 0 21%, transparent 22%),
+    radial-gradient(ellipse at 50% 28%, #648d58 0 24%, transparent 25%),
     linear-gradient(90deg, transparent 47%, #6f6b49 48% 53%, transparent 54%);
   filter: blur(.2px);
 }
@@ -4673,12 +4729,10 @@
   bottom: 11%;
   width: 190px;
   height: 64px;
-  opacity: .22;
+  opacity: .16;
   background:
-    radial-gradient(ellipse at 20% 60%, #d7ad72 0 4%, transparent 5%),
-    radial-gradient(ellipse at 52% 38%, #6f9566 0 5%, transparent 6%),
-    radial-gradient(ellipse at 78% 72%, #d7ad72 0 3%, transparent 4%),
-    linear-gradient(170deg, transparent 46%, #74906a 47% 49%, transparent 50%);
+    linear-gradient(170deg, transparent 46%, #74906a 47% 49%, transparent 50%),
+    linear-gradient(145deg, transparent 24%, #d7ad72 25% 28%, transparent 29%);
 }
 
 .orbit-shell[data-appearance='minimal'] .orbit-main::before {
@@ -4922,5 +4976,235 @@
 
   .auth-screen--auth .auth-card {
     padding: 18px 17px;
+  }
+}
+
+.orbit-shell[data-appearance='storybook'] .orbit-message-list {
+  position: relative;
+  gap: 9px;
+  padding: 22px clamp(18px, 4vw, 52px);
+  background-color: #edf1e4;
+  background-image:
+    radial-gradient(ellipse at 8% 10%, #618557 0 9px, transparent 10px),
+    radial-gradient(ellipse at 88% 21%, #789765 0 10px, transparent 11px),
+    linear-gradient(82deg, transparent 8.5%, #7f8e665c 8.7% 9%, transparent 9.2%),
+    linear-gradient(98deg, transparent 90%, #7f8e6650 90.2% 90.5%, transparent 90.7%),
+    linear-gradient(135deg, #f8f4e8, #e9f0e2);
+  background-size: 190px 220px, 220px 240px, 100% 100%, 100% 100%, auto;
+  background-position: left top, right top, center, center, center;
+}
+
+.orbit-shell[data-appearance='storybook'] .orbit-message {
+  width: min(74%, 650px);
+  margin-left: 3%;
+  border: 1px solid #b9c9a8;
+  border-radius: 9px 20px 10px 20px;
+  background:
+    radial-gradient(ellipse at 100% 0, #e4c87520, transparent 45%),
+    #fffaf0;
+  box-shadow: 0 4px 0 #71826420, 0 8px 18px #3d543514;
+}
+
+.orbit-shell[data-appearance='storybook'] .orbit-message.is-own {
+  margin-right: 3%;
+  margin-left: 0;
+  border-color: #b6cba8;
+  border-radius: 20px 9px 20px 10px;
+  background:
+    radial-gradient(ellipse at 0 100%, #92b78b25, transparent 48%),
+    #e8f0df;
+}
+
+.orbit-shell[data-appearance='minimal'] .orbit-message-list {
+  background-color: #f5f7f3;
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 35px, #72827812 36px 37px),
+    linear-gradient(90deg, #ffffffdc, #edf1ec 53%, #ffffffd9);
+}
+
+.orbit-shell[data-appearance='minimal'] .orbit-message:not(.is-own) {
+  border-color: #d3ddd4;
+  border-left: 4px solid #839b89;
+  background: #ffffff;
+  color: #303936;
+}
+
+.orbit-shell[data-appearance='minimal'] .orbit-message.is-own {
+  border-color: #a7c3ae;
+  border-left: 4px solid #4d795c;
+  background: #d9eade;
+  color: #233d2d;
+}
+
+.orbit-shell[data-appearance='minimal'] .orbit-message:not(.is-own) > p,
+.orbit-shell[data-appearance='minimal'] .orbit-message:not(.is-own) .orbit-file-card-heading strong {
+  color: #303936;
+}
+
+.orbit-shell[data-appearance='minimal'] .orbit-message.is-own > p,
+.orbit-shell[data-appearance='minimal'] .orbit-message.is-own .orbit-file-card-heading strong {
+  color: #233d2d;
+}
+
+.orbit-shell[data-appearance='watercolor'] .orbit-message-list {
+  gap: 12px;
+  background-color: #f2efe8;
+  background-image:
+    radial-gradient(ellipse at 12% 18%, #b8d7c9a6 0 7%, transparent 27%),
+    radial-gradient(ellipse at 85% 34%, #e5bfb3a1 0 8%, transparent 29%),
+    radial-gradient(ellipse at 48% 78%, #e7d79c73 0 8%, transparent 28%),
+    radial-gradient(ellipse at 93% 90%, #c3b4d172 0 7%, transparent 25%),
+    linear-gradient(145deg, #f6f0e9, #e9efe7);
+}
+
+.orbit-shell[data-appearance='watercolor'] .orbit-message {
+  width: min(72%, 620px);
+  margin-left: 2%;
+  border-color: #c8d4c1;
+  border-radius: 28px 20px 25px 11px / 20px 28px 12px 24px;
+  background:
+    radial-gradient(ellipse at 10% 12%, #d2e4d269, transparent 55%),
+    #fffaf0ed;
+  box-shadow: 0 7px 19px #7969561b, inset 0 1px #fff;
+}
+
+.orbit-shell[data-appearance='watercolor'] .orbit-message.is-own {
+  width: min(68%, 580px);
+  margin-right: 2%;
+  margin-left: 0;
+  border-color: #d5b9b1;
+  border-radius: 20px 29px 11px 26px / 29px 18px 25px 13px;
+  background:
+    radial-gradient(ellipse at 90% 12%, #edc9c769, transparent 57%),
+    #fbefebed;
+}
+
+.orbit-shell[data-appearance='anime'] .orbit-message-list {
+  gap: 11px;
+  background-color: #f8eff2;
+  background-image:
+    radial-gradient(circle at 8% 12%, #fff8cc 0 4px, transparent 5px),
+    radial-gradient(circle at 18% 19%, #e7bd77 0 2px, transparent 3px),
+    radial-gradient(circle at 92% 17%, #c9aedc99 0 25px, transparent 26px),
+    radial-gradient(circle at 85% 24%, #f3c6d499 0 11px, transparent 12px),
+    radial-gradient(circle at 9% 83%, #acd1df88 0 31px, transparent 32px),
+    linear-gradient(24deg, transparent 48%, #d788a526 49% 50%, transparent 51%),
+    linear-gradient(152deg, transparent 48%, #927dc226 49% 50%, transparent 51%),
+    repeating-linear-gradient(135deg, transparent 0 54px, #b680c115 55px 56px),
+    linear-gradient(145deg, #fff5e9, #f0e8f5);
+}
+
+.orbit-shell[data-appearance='anime'] .orbit-message {
+  width: min(70%, 600px);
+  margin-left: 1%;
+  border: 2px solid #e6b9b4;
+  border-radius: 16px 21px 17px 7px;
+  background: #fffaf2;
+  box-shadow: 0 5px 0 #d9959d63, 3px 7px 0 #80659a10;
+}
+
+.orbit-shell[data-appearance='anime'] .orbit-message.is-own {
+  width: min(66%, 560px);
+  margin-right: 1%;
+  margin-left: 0;
+  border-color: #c6add9;
+  border-radius: 21px 15px 7px 17px;
+  background: #f8edff;
+  box-shadow: 0 5px 0 #ae8acb70, -3px 7px 0 #d9959d12;
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message-list {
+  gap: 4px;
+  padding-inline: clamp(10px, 2.5vw, 30px);
+  border-color: #35443f;
+  background-color: #171d21;
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 31px, #8cb6a115 32px 33px),
+    repeating-linear-gradient(90deg, transparent 0 31px, #8cb6a10c 32px 33px),
+    radial-gradient(ellipse at 86% 13%, #816e9c40, transparent 30%),
+    linear-gradient(155deg, #192126, #1d2729);
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message-row {
+  position: relative;
+  padding-left: 14px;
+  border-left: 1px solid #86c7a14a;
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message-row::before {
+  position: absolute;
+  top: 17px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #9de0bd;
+  border-radius: 2px;
+  background: #24352f;
+  box-shadow: 0 0 10px #8ee9b268;
+  content: '';
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message {
+  width: min(100%, 690px);
+  max-width: 100%;
+  margin: 3px 0;
+  padding: 9px 12px 7px;
+  border: 1px solid #44584f;
+  border-left: 2px solid #75b994;
+  border-radius: 4px 11px 11px 4px;
+  background:
+    linear-gradient(90deg, #75b9940d, transparent 34%),
+    #20292b;
+  box-shadow: inset 0 0 18px #6dc79408;
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message.is-own {
+  border-color: #586d78;
+  border-right: 2px solid #b3a0d4;
+  border-left: 1px solid #586d78;
+  border-radius: 11px 4px 4px 11px;
+  background:
+    linear-gradient(270deg, #aa91d217, transparent 40%),
+    #252a35;
+}
+
+.orbit-shell[data-appearance='midnight'] .orbit-message > p {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+@media (max-width: 680px) {
+  .orbit-shell[data-appearance='storybook'] .orbit-message-list,
+  .orbit-shell[data-appearance='watercolor'] .orbit-message-list,
+  .orbit-shell[data-appearance='anime'] .orbit-message-list {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .orbit-shell[data-appearance='storybook'] .orbit-message,
+  .orbit-shell[data-appearance='watercolor'] .orbit-message,
+  .orbit-shell[data-appearance='anime'] .orbit-message {
+    width: min(89%, 620px);
+    padding: 8px 9px 6px;
+  }
+
+  .orbit-shell[data-appearance='storybook'] .orbit-message.is-own,
+  .orbit-shell[data-appearance='watercolor'] .orbit-message.is-own,
+  .orbit-shell[data-appearance='anime'] .orbit-message.is-own {
+    width: min(85%, 580px);
+  }
+
+  .orbit-shell[data-appearance='midnight'] .orbit-message-list {
+    padding-inline: 6px;
+  }
+
+  .orbit-shell[data-appearance='midnight'] .orbit-message-row {
+    padding-left: 8px;
+  }
+
+  .orbit-shell[data-appearance='midnight'] .orbit-message {
+    width: 100%;
+    padding: 7px 8px 6px;
   }
 }

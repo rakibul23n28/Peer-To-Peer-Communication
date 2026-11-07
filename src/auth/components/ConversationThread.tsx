@@ -181,7 +181,7 @@ export function ConversationThread({
     </header>
 
     {peerBlocked && <div className="orbit-blocked-banner" role="status">
-      You blocked @{conversation.peer.username}. Messages and file sharing are disabled.
+      <span>You blocked @{conversation.peer.username}. Messages and files are paused.</span>
       <button type="button" onClick={onUnblock}>Unblock</button>
     </div>}
     {!conversation.peer.keyAvailable && <div className="orbit-key-warning" role="status">

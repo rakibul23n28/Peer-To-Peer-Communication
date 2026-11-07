@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import { Inject, Logger } from "@nestjs/common"
+import { Inject, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common"
 
 import {
   ConnectedSocket,
@@ -69,6 +69,39 @@ const peerFileRequestSchema = z.object({
   requestId: z.string().uuid(),
 }).strict()
 
+const audioCallInviteSchema = z.object({
+  callId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+}).strict()
+
+const audioCallIdSchema = z.object({
+  callId: z.string().uuid(),
+}).strict()
+
+const audioCallResponseSchema = audioCallIdSchema.extend({
+  accepted: z.boolean(),
+}).strict()
+
+const audioCallSignalSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("offer"),
+    sdp: z.string().min(1).max(32_000),
+  }).strict(),
+  z.object({
+    type: z.literal("answer"),
+    sdp: z.string().min(1).max(32_000),
+  }).strict(),
+  z.object({
+    type: z.literal("ice"),
+    candidate: z.object({
+      candidate: z.string().max(2048),
+      sdpMid: z.string().max(256).nullable().optional(),
+      sdpMLineIndex: z.number().int().min(0).max(1024).nullable().optional(),
+      usernameFragment: z.string().max(256).nullable().optional(),
+    }).strict(),
+  }).strict(),
+])
+
 const fileSignalSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("accept"),
@@ -88,7 +121,7 @@ const fileSignalSchema = z.discriminatedUnion("type", [
     type: z.literal("ice"),
     fileId: z.string().uuid(),
     candidate: z.object({
-      candidate: z.string().min(1).max(2048),
+      candidate: z.string().max(2048),
       sdpMid: z.string().max(256).nullable().optional(),
       sdpMLineIndex: z.number().int().min(0).max(1024).nullable().optional(),
       usernameFragment: z.string().max(256).nullable().optional(),
@@ -100,7 +133,18 @@ const fileSignalSchema = z.discriminatedUnion("type", [
   }).strict(),
 ])
 
-export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
+interface AudioCallRecord {
+  callId: string
+  conversationId: string
+  callerId: string
+  calleeId: string
+  callerSocket: WebSocket
+  calleeSocket: WebSocket | null
+  status: "ringing" | "active"
+  expiresAt: number
+}
+
+export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   handleProtocols(protocols: string[] | undefined): string | false {
     if (!protocols || protocols.length === 0) return "orbit.v1"
     if (protocols.includes("orbit.v1")) return "orbit.v1"
@@ -124,6 +168,12 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     expiresAt: number
   }>()
 
+  private readonly audioCalls = new Map<string, AudioCallRecord>()
+
+  private readonly audioCallByUser = new Map<string, string>()
+
+  private audioCallExpiryTimer: ReturnType<typeof setInterval> | null = null
+
   constructor(
     private readonly auth: AuthService,
 
@@ -133,6 +183,15 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     private readonly files: FilesService,
   ) {}
+
+  onModuleInit(): void {
+    this.audioCallExpiryTimer = setInterval(() => this.expireAudioCalls(), 5_000)
+  }
+
+  onModuleDestroy(): void {
+    if (this.audioCallExpiryTimer) clearInterval(this.audioCallExpiryTimer)
+    this.audioCallExpiryTimer = null
+  }
 
   handleConnection(client: WebSocket): void {
     this.authTimers.set(
@@ -145,6 +204,16 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const timer = this.authTimers.get(client)
 
     if (timer) clearTimeout(timer)
+
+    for (const call of this.audioCalls.values()) {
+      if (call.callerSocket !== client && call.calleeSocket !== client) continue
+      this.sendToUser(call.callerId === this.users.get(client) ? call.calleeId : call.callerId, {
+        type: "call.ended",
+        id: randomUUID(),
+        payload: { callId: call.callId, reason: "connection-closed" },
+      })
+      this.removeAudioCall(call)
+    }
   }
 
   async authenticate(
@@ -494,6 +563,208 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { type: "file.peer.signal.ack", id: input.signal.fileId, payload: { delivered: true } }
   }
 
+  async inviteAudioCall(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = audioCallInviteSchema.parse(body)
+    this.expireAudioCalls()
+    let members: string[]
+    try {
+      members = await this.conversations.memberIds(input.conversationId, userId)
+    } catch (error) {
+      this.logger.warn(`Audio call invite could not be authorized (${error instanceof Error ? error.name : "unknown"})`)
+      return this.sendAudioCallError(client, input.callId, "Could not start the call. Check the conversation and try again.")
+    }
+    if (members.length !== 2) {
+      return this.sendAudioCallError(client, input.callId, "This conversation cannot start an audio call.")
+    }
+    const [memberA, memberB] = members
+    const calleeId = memberA === userId ? memberB : memberA
+    if (this.audioCalls.has(input.callId)) {
+      return this.sendAudioCallError(client, input.callId, "A call with this ID already exists.")
+    }
+    if (this.audioCallByUser.has(userId) || this.audioCallByUser.has(calleeId)) {
+      return this.sendAudioCallError(client, input.callId, "One of you is already in a call.")
+    }
+    if (!this.hasConnectedUser(calleeId)) {
+      return this.sendAudioCallError(client, input.callId, "This person is currently offline.")
+    }
+
+    const call: AudioCallRecord = {
+      callId: input.callId,
+      conversationId: input.conversationId,
+      callerId: userId,
+      calleeId,
+      callerSocket: client,
+      calleeSocket: null,
+      status: "ringing",
+      expiresAt: Date.now() + 45_000,
+    }
+    this.audioCalls.set(call.callId, call)
+    this.audioCallByUser.set(userId, call.callId)
+    this.audioCallByUser.set(calleeId, call.callId)
+    this.sendToUser(calleeId, {
+      type: "call.incoming",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: {
+        callId: call.callId,
+        conversationId: call.conversationId,
+        callerId: call.callerId,
+        expiresAt: call.expiresAt,
+      },
+    })
+    return { type: "call.invite.ack", id: call.callId, payload: { delivered: true } }
+  }
+
+  async respondToAudioCall(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = audioCallResponseSchema.parse(body)
+    this.expireAudioCalls()
+    const call = this.audioCalls.get(input.callId)
+    if (!call || call.status !== "ringing" || call.calleeId !== userId) {
+      return this.sendAudioCallError(client, input.callId, "This call invitation has expired.")
+    }
+    if (input.accepted) {
+      call.status = "active"
+      call.calleeSocket = client
+      call.expiresAt = Date.now() + 4 * 60 * 60 * 1000
+      this.sendToSocket(call.callerSocket, {
+        type: "call.accepted",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: { callId: call.callId, conversationId: call.conversationId },
+      })
+    } else {
+      this.sendToSocket(call.callerSocket, {
+        type: "call.declined",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: { callId: call.callId },
+      })
+      this.removeAudioCall(call)
+    }
+    return { type: "call.response.ack", id: call.callId, payload: { accepted: input.accepted } }
+  }
+
+  async cancelAudioCall(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = audioCallIdSchema.parse(body)
+    this.expireAudioCalls()
+    const call = this.audioCalls.get(input.callId)
+    if (!call || call.callerId !== userId || call.status !== "ringing") {
+      return this.sendAudioCallError(client, input.callId, "This call can no longer be cancelled.")
+    }
+    this.sendToUser(call.calleeId, {
+      type: "call.cancelled",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { callId: call.callId },
+    })
+    this.removeAudioCall(call)
+    return { type: "call.cancel.ack", id: call.callId, payload: { ok: true } }
+  }
+
+  async hangupAudioCall(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = audioCallIdSchema.parse(body)
+    this.expireAudioCalls()
+    const call = this.audioCalls.get(input.callId)
+    if (!call || call.status !== "active" || (call.callerId !== userId && call.calleeId !== userId)) {
+      return this.sendAudioCallError(client, input.callId, "This call is no longer active.")
+    }
+    const otherUserId = call.callerId === userId ? call.calleeId : call.callerId
+    this.sendToUser(otherUserId, {
+      type: "call.ended",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { callId: call.callId, reason: "hangup" },
+    })
+    this.removeAudioCall(call)
+    return { type: "call.hangup.ack", id: call.callId, payload: { ok: true } }
+  }
+
+  async relayAudioCallSignal(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = z.object({
+      callId: z.string().uuid(),
+      signal: audioCallSignalSchema,
+    }).strict().parse(body)
+    this.expireAudioCalls()
+    const call = this.audioCalls.get(input.callId)
+    if (!call || call.status !== "active") {
+      return this.sendAudioCallError(client, input.callId, "This call is no longer active.")
+    }
+    const isCaller = call.callerId === userId && call.callerSocket === client
+    const isCallee = call.calleeId === userId && call.calleeSocket === client
+    if (!isCaller && !isCallee) {
+      return this.sendAudioCallError(client, input.callId, "This device is not part of the call.")
+    }
+    if (
+      (input.signal.type === "offer" && !isCaller) ||
+      (input.signal.type === "answer" && !isCallee)
+    ) {
+      return this.sendAudioCallError(client, input.callId, "Invalid call signaling direction.")
+    }
+    const recipient = isCaller ? call.calleeSocket : call.callerSocket
+    if (!recipient || recipient.readyState !== WebSocket.OPEN) {
+      this.removeAudioCall(call)
+      return this.sendAudioCallError(client, input.callId, "The other person's connection was lost.")
+    }
+    this.sendToSocket(recipient, {
+      type: "call.signal",
+      id: randomUUID(),
+      ts: Date.now(),
+      payload: { callId: call.callId, signal: input.signal },
+    })
+    return { type: "call.signal.ack", id: call.callId, payload: { delivered: true } }
+  }
+
+  private sendAudioCallError(client: WebSocket, callId: string, message: string) {
+    this.sendToSocket(client, {
+      type: "call.error",
+      id: randomUUID(),
+      payload: { callId, message },
+    })
+    return { type: "call.error.ack", id: callId, payload: { message } }
+  }
+
+  private expireAudioCalls(): void {
+    const now = Date.now()
+    for (const call of this.audioCalls.values()) {
+      if (call.expiresAt > now) continue
+      const event = call.status === "ringing" ? "call.timeout" : "call.ended"
+      const payload = call.status === "ringing"
+        ? { callId: call.callId }
+        : { callId: call.callId, reason: "maximum-duration" }
+      this.sendToUser(call.callerId, { type: event, id: randomUUID(), payload })
+      this.sendToUser(call.calleeId, { type: event, id: randomUUID(), payload })
+      this.removeAudioCall(call)
+    }
+  }
+
+  private removeAudioCall(call: AudioCallRecord): void {
+    this.audioCalls.delete(call.callId)
+    if (this.audioCallByUser.get(call.callerId) === call.callId) {
+      this.audioCallByUser.delete(call.callerId)
+    }
+    if (this.audioCallByUser.get(call.calleeId) === call.callId) {
+      this.audioCallByUser.delete(call.calleeId)
+    }
+  }
+
+  private hasConnectedUser(userId: string): boolean {
+    for (const client of this.server.clients) {
+      if (client.readyState === WebSocket.OPEN && this.users.get(client) === userId) return true
+    }
+    return false
+  }
+
+  private sendToSocket(client: WebSocket, event: Record<string, unknown>): void {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ event: event.type, data: event }))
+    }
+  }
+
   private async authenticatedUser(client: WebSocket): Promise<string> {
     const userId = this.users.get(client)
 
@@ -604,3 +875,8 @@ registerHandler("file.status", "updateFile")
 registerHandler("file.peer.request", "requestPeerFileShare")
 registerHandler("file.peer.response", "respondToPeerFileShare")
 registerHandler("file.peer.signal", "relayFileSignal")
+registerHandler("call.invite", "inviteAudioCall")
+registerHandler("call.respond", "respondToAudioCall")
+registerHandler("call.cancel", "cancelAudioCall")
+registerHandler("call.hangup", "hangupAudioCall")
+registerHandler("call.signal", "relayAudioCallSignal")

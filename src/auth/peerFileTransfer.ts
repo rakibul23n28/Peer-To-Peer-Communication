@@ -1,4 +1,5 @@
 import { getTurnIceConfiguration } from './session';
+import { sha256 } from '@noble/hashes/sha2';
 
 export type PeerFileSignal =
   | { type: 'accept'; fileId: string }
@@ -16,12 +17,17 @@ interface PeerFileTransferOptions {
   onSignal: (signal: PeerFileSignal) => void;
   onProgress: (transferred: number, total: number) => void;
   onComplete: (blob: Blob) => void;
+  onSent: () => void;
   onError: (error: Error) => void;
 }
 
 const chunkSize = 32 * 1024;
+const hashBlockSize = 4 * 1024 * 1024;
+const diskReceiveThreshold = 32 * 1024 * 1024;
+const maximumMemoryReceiveSize = 64 * 1024 * 1024;
 const ivSize = 12;
 const headerSize = 4 + ivSize;
+const maxChunkCount = 0xffffffff;
 
 async function getIceServers(): Promise<RTCIceServer[]> {
   const { iceServers } = await getTurnIceConfiguration();
@@ -37,20 +43,47 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+export async function hashFile(
+  file: Blob,
+  onProgress?: (processed: number, total: number) => void,
+): Promise<string> {
+  const hash = sha256.create();
+  for (let offset = 0; offset < file.size; offset += hashBlockSize) {
+    const end = Math.min(offset + hashBlockSize, file.size);
+    hash.update(new Uint8Array(await file.slice(offset, end).arrayBuffer()));
+    onProgress?.(end, file.size);
+  }
+  return toBase64(hash.digest());
+}
+
+export function supportsFileSize(size: number): boolean {
+  return size <= maximumMemoryReceiveSize || typeof navigator.storage?.getDirectory === 'function';
+}
+
 export class PeerFileTransfer {
   private connection: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private readonly pendingCandidates: RTCIceCandidateInit[] = [];
-  private readonly receivedChunks = new Map<number, ArrayBuffer>();
+  private readonly receivedChunks: ArrayBuffer[] = [];
   private readonly acknowledgedChunks = new Set<number>();
-  private source: ArrayBuffer | null = null;
+  private readonly receiveHash = sha256.create();
+  private receiveQueue = Promise.resolve();
+  private receiveReady = Promise.resolve();
+  private source: File | null = null;
+  private receiveDirectory: FileSystemDirectoryHandle | null = null;
+  private receiveFileHandle: FileSystemFileHandle | null = null;
+  private receiveWriter: FileSystemWritableFileStream | null = null;
+  private receivedChunkCount = 0;
+  private receivedBytes = 0;
+  private acknowledgedBytes = 0;
   private failed = false;
   private completed = false;
   private iceServers: RTCIceServer[] = [];
 
   constructor(private readonly options: PeerFileTransferOptions) {}
 
-  async startSender(source: ArrayBuffer): Promise<void> {
+  async startSender(source: File): Promise<void> {
+    this.validateChunkCount(source.size);
     this.source = source;
     await this.createConnection();
     const channel = this.connection!.createDataChannel('orbit-file', { ordered: true });
@@ -102,6 +135,23 @@ export class PeerFileTransfer {
     this.connection?.close();
     this.channel = null;
     this.connection = null;
+    this.source = null;
+    this.receivedChunks.length = 0;
+    this.pendingCandidates.length = 0;
+    const writer = this.receiveWriter;
+    const directory = this.receiveDirectory;
+    const fileHandle = this.receiveFileHandle;
+    this.receiveWriter = null;
+    this.receiveDirectory = null;
+    this.receiveFileHandle = null;
+    if (!this.completed && directory && fileHandle) {
+      const abort = writer ? writer.abort() : Promise.resolve();
+      void abort.then(() => directory.removeEntry(fileHandle.name)).catch((error: unknown) => {
+        this.options.onError(error instanceof Error
+          ? new Error(`Could not remove the incomplete received file: ${error.message}`)
+          : new Error('Could not remove the incomplete received file.'));
+      });
+    }
   }
 
   private async createConnection(): Promise<void> {
@@ -140,7 +190,17 @@ export class PeerFileTransfer {
     channel.onopen = () => {
       this.options.onProgress(0, this.options.size);
       if (sender && this.source) void this.transmit();
-      if (!sender && this.options.size === 0) void this.finishReceive();
+      if (!sender) {
+        this.receiveReady = this.prepareReceiveStorage();
+        void this.receiveReady.catch((error: unknown) => {
+          this.fail(error instanceof Error ? error : new Error('Could not prepare local storage for this file.'));
+        });
+        if (this.options.size === 0) {
+          void this.receiveReady.then(() => this.finishReceive()).catch((error: unknown) => {
+            this.fail(error instanceof Error ? error : new Error('Could not finish the empty file transfer.'));
+          });
+        }
+      }
     };
     channel.onerror = () => this.fail(new Error('The direct file-transfer channel failed.'));
     channel.onmessage = (event) => {
@@ -149,7 +209,7 @@ export class PeerFileTransfer {
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return;
-      void this.receiveChunk(event.data).catch((error: unknown) => {
+      this.receiveQueue = this.receiveQueue.then(() => this.receiveChunk(event.data as ArrayBuffer)).catch((error: unknown) => {
         this.fail(error instanceof Error ? error : new Error('Could not decrypt the received file.'));
       });
     };
@@ -159,12 +219,14 @@ export class PeerFileTransfer {
     const channel = this.channel;
     const source = this.source;
     if (!channel || !source) return;
-    const totalChunks = Math.ceil(source.byteLength / chunkSize);
+    const totalChunks = Math.ceil(source.size / chunkSize);
     for (let index = 0; index < totalChunks; index += 1) {
       if (this.failed || channel.readyState !== 'open') return;
       await this.waitForBuffer(channel);
       const start = index * chunkSize;
-      const plaintext = source.slice(start, Math.min(start + chunkSize, source.byteLength));
+      const plaintext = new Uint8Array(
+        await source.slice(start, Math.min(start + chunkSize, source.size)).arrayBuffer(),
+      );
       const iv = crypto.getRandomValues(new Uint8Array(ivSize));
       const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.options.key, plaintext);
       const packet = new Uint8Array(headerSize + encrypted.byteLength);
@@ -187,6 +249,17 @@ export class PeerFileTransfer {
     const packet = acknowledgement as { type?: unknown; fileId?: unknown; index?: unknown };
     const totalChunks = Math.ceil(this.options.size / chunkSize);
     if (
+      packet.type === 'complete' &&
+      packet.fileId === this.options.fileId &&
+      this.acknowledgedChunks.size === totalChunks &&
+      !this.completed
+    ) {
+      this.completed = true;
+      this.source = null;
+      this.options.onSent();
+      return;
+    }
+    if (
       packet.type !== 'ack' ||
       packet.fileId !== this.options.fileId ||
       !Number.isSafeInteger(packet.index) ||
@@ -195,19 +268,25 @@ export class PeerFileTransfer {
       this.acknowledgedChunks.has(packet.index as number)
     ) return;
     this.acknowledgedChunks.add(packet.index as number);
-    const transferred = [...this.acknowledgedChunks].reduce(
-      (total, index) => total + Math.min(chunkSize, this.options.size - index * chunkSize),
-      0,
-    );
-    this.options.onProgress(transferred, this.options.size);
+    this.acknowledgedBytes += Math.min(chunkSize, this.options.size - (packet.index as number) * chunkSize);
+    this.options.onProgress(this.acknowledgedBytes, this.options.size);
+    if (this.acknowledgedChunks.size === totalChunks) this.source = null;
+  }
+
+  private validateChunkCount(size: number): void {
+    if (!Number.isSafeInteger(size) || size < 0 || Math.ceil(size / chunkSize) > maxChunkCount) {
+      throw new Error('This file is too large for the supported secure transfer format.');
+    }
   }
 
   private async receiveChunk(packet: ArrayBuffer): Promise<void> {
+    await this.receiveReady;
+    if (this.failed || this.completed) return;
     if (packet.byteLength < headerSize + 16) throw new Error('The received file data is incomplete.');
     const bytes = new Uint8Array(packet);
     const index = new DataView(packet).getUint32(0);
     const totalChunks = Math.ceil(this.options.size / chunkSize);
-    if (index >= totalChunks || this.receivedChunks.has(index)) {
+    if (index >= totalChunks || index !== this.receivedChunkCount) {
       throw new Error('The received file data contains an invalid chunk.');
     }
     const plaintext = await crypto.subtle.decrypt(
@@ -217,29 +296,64 @@ export class PeerFileTransfer {
     );
     const expectedSize = Math.min(chunkSize, this.options.size - index * chunkSize);
     if (plaintext.byteLength !== expectedSize) throw new Error('The received file data has an invalid size.');
-    this.receivedChunks.set(index, plaintext);
+    const chunk = new Uint8Array(plaintext);
+    if (this.receiveWriter) {
+      await this.receiveWriter.write(plaintext);
+    } else {
+      if (this.options.size > maximumMemoryReceiveSize) {
+        throw new Error('This browser does not support disk-backed receiving for files larger than 64 MB.');
+      }
+      this.receivedChunks.push(plaintext);
+    }
+    this.receiveHash.update(chunk);
+    this.receivedBytes += chunk.byteLength;
+    this.receivedChunkCount += 1;
     if (this.channel?.readyState === 'open') {
       this.channel.send(JSON.stringify({ type: 'ack', fileId: this.options.fileId, index }));
     }
-    const transferred = [...this.receivedChunks.values()].reduce((total, chunk) => total + chunk.byteLength, 0);
-    this.options.onProgress(transferred, this.options.size);
-    if (this.receivedChunks.size === totalChunks) await this.finishReceive();
+    this.options.onProgress(this.receivedBytes, this.options.size);
+    if (this.receivedChunkCount === totalChunks) await this.finishReceive();
   }
 
   private async finishReceive(): Promise<void> {
     if (this.completed || this.failed) return;
-    const chunks = Array.from({ length: Math.ceil(this.options.size / chunkSize) }, (_, index) => {
-      const chunk = this.receivedChunks.get(index);
-      if (!chunk) throw new Error('The received file is missing data.');
-      return chunk;
-    });
-    const blob = new Blob(chunks, { type: this.options.mime });
-    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-    if (toBase64(new Uint8Array(digest)) !== this.options.sha256) {
+    this.validateChunkCount(this.options.size);
+    if (toBase64(this.receiveHash.digest()) !== this.options.sha256) {
       throw new Error('The received file failed its integrity check.');
     }
+    if (this.receiveWriter) {
+      await this.receiveWriter.close();
+      this.receiveWriter = null;
+    }
+    const blob = this.receiveFileHandle
+      ? new File([await this.receiveFileHandle.getFile()], this.options.fileId, { type: this.options.mime })
+      : new Blob(this.receivedChunks, { type: this.options.mime });
     this.completed = true;
+    if (this.channel?.readyState === 'open') {
+      this.channel.send(JSON.stringify({ type: 'complete', fileId: this.options.fileId }));
+    }
     this.options.onComplete(blob);
+    this.receivedChunks.length = 0;
+  }
+
+  private async prepareReceiveStorage(): Promise<void> {
+    if (this.options.size <= diskReceiveThreshold) return;
+    if (!navigator.storage?.getDirectory) {
+      if (this.options.size > maximumMemoryReceiveSize) {
+        throw new Error('This browser does not support disk-backed receiving for files larger than 64 MB.');
+      }
+      return;
+    }
+    const directory = await navigator.storage.getDirectory();
+    const storage = await navigator.storage.estimate();
+    if (storage.quota !== undefined && storage.usage !== undefined &&
+      storage.quota - storage.usage < this.options.size) {
+      throw new Error('There is not enough browser storage available to receive this file.');
+    }
+    const fileHandle = await directory.getFileHandle(`orbit-${this.options.fileId}.part`, { create: true });
+    this.receiveDirectory = directory;
+    this.receiveFileHandle = fileHandle;
+    this.receiveWriter = await fileHandle.createWritable();
   }
 
   private async waitForBuffer(channel: RTCDataChannel): Promise<void> {

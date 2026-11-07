@@ -1,6 +1,8 @@
 # Peer file transfers
 
-File contents are encrypted and transferred between browsers over WebRTC. The app server stores only the encrypted offer and transfer metadata. STUN is tried first; a TURN relay is needed when NATs or firewalls prevent a direct connection.
+File contents are encrypted and transferred between browsers over WebRTC. The app server stores only the encrypted offer and transfer metadata. Files are read and sent in 32 KiB encrypted chunks; the receiver verifies a streaming SHA-256 digest and writes files larger than 32 MiB to the browser's origin-private storage when available. Without that storage API, receiving falls back to memory up to 64 MiB. Browser storage quota still applies. STUN is tried first; a TURN relay is needed when NATs or firewalls prevent a direct connection.
+
+Audio calls use authenticated WebSocket signaling and WebRTC audio media between the two browsers; the application server does not receive call audio. Calls need microphone permission and a secure browser context (HTTPS, or localhost for development). STUN may be enough on open networks; configure the TURN relay below for users behind restrictive NATs or firewalls. The same short-lived TURN credentials are used for audio calls and file transfers.
 
 ## Self-hosted TURN setup
 
@@ -40,7 +42,7 @@ The app now requests short-lived TURN credentials from the authenticated backend
 
 - Verify `turn.example.com` resolves to the VPS public IP.
 - Confirm both firewalls allow the TURN listener and relay UDP range.
-- Test file sharing between devices on different networks. A LAN-only test does not prove that TURN is being used.
+- Test file sharing and audio calls between devices on different networks. A LAN-only test does not prove that TURN is being used.
 - If direct connections still fail, verify the backend is reachable at `/v1/turn/credentials`, that both server configurations use the same secret, and that the browser's network permits UDP. Some restricted networks may also require a TLS TURN listener.
 
 TURN relays encrypted WebRTC packets while the peers exchange the file; the app server still does not store file bytes. A public VPS or TURN relay cannot be provisioned from this source workspace, so these deployment steps must be completed on your host.

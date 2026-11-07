@@ -38,9 +38,12 @@ interface ConversationThreadProps {
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
   detailsOpen: boolean;
+  audioCallDisabled: boolean;
+  audioCallLabel: string;
   onBack: () => void;
   onToggleNavigation: () => void;
   onToggleDetails: () => void;
+  onStartAudioCall: () => void;
   onBlock: () => void;
   onUnblock: () => void;
   onRetryThread: () => void;
@@ -108,9 +111,12 @@ export function ConversationThread({
   hasOlderMessages,
   loadingOlderMessages,
   detailsOpen,
+  audioCallDisabled,
+  audioCallLabel,
   onBack,
   onToggleNavigation,
   onToggleDetails,
+  onStartAudioCall,
   onBlock,
   onUnblock,
   onRetryThread,
@@ -146,6 +152,10 @@ export function ConversationThread({
         <div className="orbit-thread-meta"><span>@{conversation.peer.username}</span><span className={`orbit-connection-pill${connection === 'connected' ? ' is-connected' : ''}`}><i />{connection === 'connected' ? 'Secure link' : 'Reconnecting'}</span></div>
       </div>
       <div className="orbit-thread-actions">
+        <button className="orbit-audio-call-button" type="button" onClick={onStartAudioCall} disabled={audioCallDisabled} aria-label={audioCallLabel} title={audioCallLabel}>
+          <OrbitIcon name="phone" />
+          <span>{audioCallLabel}</span>
+        </button>
         <button className="orbit-workspace-nav-toggle" type="button" onClick={onToggleNavigation} aria-label="Toggle navigation" title="Toggle navigation">
           <OrbitIcon name="collapse" />
         </button>

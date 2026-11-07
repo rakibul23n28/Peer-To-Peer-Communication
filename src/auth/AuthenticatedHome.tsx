@@ -33,7 +33,9 @@ import {
 import { decryptMessage, derivePeerKey, encryptMessage } from './messageCrypto';
 import { getDeviceIdentity, getDeviceIdentityForVersion, getSavedDeviceIdentities, type DeviceIdentity } from './keyStore';
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
-import { PeerFileTransfer, type PeerFileSignal } from './peerFileTransfer';
+import { hashFile, PeerFileTransfer, supportsFileSize, type PeerFileSignal } from './peerFileTransfer';
+import { PeerAudioCall, type PeerAudioSignal } from './peerAudioCall';
+import { AudioCallPanel, type AudioCallView } from './components/AudioCallPanel';
 import { ConversationThread, type FileTransferProgress, type ThreadMessage } from './components/ConversationThread';
 import { ConversationSidebar } from './components/ConversationSidebar';
 import { EmptyConversationState } from './components/EmptyConversationState';
@@ -242,8 +244,14 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [fileSending, setFileSending] = useState(false);
   const [fileProgress, setFileProgress] = useState<Record<string, FileTransferProgress>>({});
   const [receivedFiles, setReceivedFiles] = useState<Record<string, { name: string; blob: Blob; url: string }>>({});
+  const [audioCall, setAudioCall] = useState<AudioCallView | null>(null);
+  const [remoteAudioStream, setRemoteAudioStream] = useState<MediaStream | null>(null);
   const receivedFilesRef = useRef(receivedFiles);
   receivedFilesRef.current = receivedFiles;
+  const audioCallRef = useRef<AudioCallView | null>(audioCall);
+  audioCallRef.current = audioCall;
+  const connectionRef = useRef(connection);
+  connectionRef.current = connection;
   const [blockedUsers, setBlockedUsers] = useState<UserSearchResult[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(false);
   const messageListRef = useRef<HTMLElement | null>(null);
@@ -263,8 +271,194 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const peerPublicKeysRef = useRef(new Map<string, Promise<string>>());
   const fileTransfersRef = useRef(new Map<string, PeerFileTransfer>());
   const sourceFilesRef = useRef(new Map<string, File>());
-  const sourceBuffersRef = useRef(new Map<string, ArrayBuffer>());
   const fileInfoRef = useRef(new Map<string, { size: number; mime: string; sha256: string; recipientKeyVersion: number }>());
+  const audioCallSessionRef = useRef<PeerAudioCall | null>(null);
+  const startingAudioCallRef = useRef(false);
+
+  function updateAudioCall(
+    update: AudioCallView | null | ((current: AudioCallView | null) => AudioCallView | null),
+  ): void {
+    const next = typeof update === 'function' ? update(audioCallRef.current) : update;
+    audioCallRef.current = next;
+    setAudioCall(next);
+  }
+
+  function finishAudioCall(sendSignal: boolean, message?: string): void {
+    const current = audioCallRef.current;
+    if (!current) return;
+    if (sendSignal && connectionRef.current === 'connected') {
+      try {
+        const event = current.phase === 'ringing'
+          ? current.direction === 'incoming' ? 'call.respond' : 'call.cancel'
+          : 'call.hangup';
+        const data = event === 'call.respond'
+          ? { callId: current.callId, accepted: false }
+          : { callId: current.callId };
+        sendOrbitEvent(event, data);
+      } catch (error) {
+        if (!message) message = error instanceof Error ? error.message : 'Could not notify the other person that the call ended.';
+      }
+    }
+    audioCallSessionRef.current?.close();
+    audioCallSessionRef.current = null;
+    setRemoteAudioStream(null);
+    updateAudioCall(null);
+    if (message) setNotice(message);
+  }
+
+  function createAudioCallSession(callId: string, stream: MediaStream): PeerAudioCall {
+    return new PeerAudioCall({
+      stream,
+      onSignal: (signal: PeerAudioSignal) => {
+        try {
+          sendOrbitEvent('call.signal', { callId, signal });
+        } catch (error) {
+          finishAudioCall(false, error instanceof Error ? error.message : 'Could not signal the audio call.');
+        }
+      },
+      onRemoteStream: setRemoteAudioStream,
+      onConnected: () => updateAudioCall((current) => current?.callId === callId
+        ? { ...current, phase: 'active', startedAt: current.startedAt ?? Date.now() }
+        : current),
+      onError: (error) => finishAudioCall(true, error.message),
+    });
+  }
+
+  async function startAudioCall(): Promise<void> {
+    const conversation = selected;
+    if (!conversation || peerBlocked || audioCallRef.current || startingAudioCallRef.current) return;
+    if (connection !== 'connected') {
+      setNotice('Reconnect before starting an audio call.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setNotice('Audio calls require microphone access on a secure connection.');
+      return;
+    }
+    startingAudioCallRef.current = true;
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      if (audioCallRef.current || selectedId !== conversation.id) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      const callId = crypto.randomUUID();
+      audioCallSessionRef.current = createAudioCallSession(callId, stream);
+      updateAudioCall({
+        callId,
+        conversationId: conversation.id,
+        peerId: conversation.peer.id,
+        peerName: conversation.peer.displayName,
+        direction: 'outgoing',
+        phase: 'ringing',
+        muted: false,
+        startedAt: null,
+      });
+      sendOrbitEvent('call.invite', { callId, conversationId: conversation.id });
+    } catch (error) {
+      if (audioCallRef.current) finishAudioCall(false);
+      else if (stream) for (const track of stream.getTracks()) track.stop();
+      setNotice(error instanceof Error ? error.message : 'Could not start the audio call.');
+    } finally {
+      startingAudioCallRef.current = false;
+    }
+  }
+
+  async function acceptAudioCall(): Promise<void> {
+    const current = audioCallRef.current;
+    if (!current || current.direction !== 'incoming' || current.phase !== 'ringing') return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      finishAudioCall(true, 'Audio calls require microphone access on a secure connection.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      if (audioCallRef.current?.callId !== current.callId) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      audioCallSessionRef.current = createAudioCallSession(current.callId, stream);
+      updateAudioCall({ ...current, phase: 'connecting' });
+      sendOrbitEvent('call.respond', { callId: current.callId, accepted: true });
+    } catch (error) {
+      finishAudioCall(true, error instanceof Error ? error.message : 'Could not accept the audio call.');
+    }
+  }
+
+  function toggleAudioMute(): void {
+    const current = audioCallRef.current;
+    if (!current || current.phase === 'ringing') return;
+    const muted = !current.muted;
+    audioCallSessionRef.current?.setMuted(muted);
+    updateAudioCall({ ...current, muted });
+  }
+
+  function handleAudioCallEvent(eventName: string, data: unknown): void {
+    if (!data || typeof data !== 'object') return;
+    const payload = (data as { payload?: unknown }).payload;
+    if (!payload || typeof payload !== 'object') return;
+    const value = payload as {
+      callId?: unknown
+      conversationId?: unknown
+      callerId?: unknown
+      signal?: unknown
+      message?: unknown
+    };
+    if (typeof value.callId !== 'string') return;
+    const current = audioCallRef.current;
+
+    if (eventName === 'call.incoming') {
+      if (typeof value.conversationId !== 'string' || typeof value.callerId !== 'string') return;
+      if (current) {
+        try {
+          sendOrbitEvent('call.respond', { callId: value.callId, accepted: false });
+        } catch {
+          setNotice('A second call came in while you were already on a call.');
+        }
+        return;
+      }
+      const conversation = conversationsRef.current.find(({ id }) => id === value.conversationId);
+      updateAudioCall({
+        callId: value.callId,
+        conversationId: value.conversationId,
+        peerId: value.callerId,
+        peerName: conversation?.peer.displayName ?? 'Orbit contact',
+        direction: 'incoming',
+        phase: 'ringing',
+        muted: false,
+        startedAt: null,
+      });
+      return;
+    }
+
+    if (!current || current.callId !== value.callId) return;
+    if (eventName === 'call.accepted' && current.direction === 'outgoing') {
+      updateAudioCall({ ...current, phase: 'connecting' });
+      const session = audioCallSessionRef.current;
+      if (!session) {
+        finishAudioCall(true, 'The microphone session could not be started.');
+        return;
+      }
+      void session.createOffer().catch((error: unknown) => {
+        finishAudioCall(true, error instanceof Error ? error.message : 'Could not negotiate the audio connection.');
+      });
+    } else if (eventName === 'call.signal' && value.signal && audioCallSessionRef.current) {
+      void audioCallSessionRef.current.handleSignal(value.signal as PeerAudioSignal).catch((error: unknown) => {
+        finishAudioCall(true, error instanceof Error ? error.message : 'The audio connection could not be established.');
+      });
+    } else if (eventName === 'call.error') {
+      finishAudioCall(current.phase !== 'ringing', typeof value.message === 'string' ? value.message : 'The audio call could not be completed.');
+    } else if (eventName === 'call.declined') {
+      finishAudioCall(false, `${current.peerName} declined the call.`);
+    } else if (eventName === 'call.cancelled') {
+      finishAudioCall(false, `${current.peerName} cancelled the call.`);
+    } else if (eventName === 'call.timeout') {
+      finishAudioCall(false, 'The audio call was not answered.');
+    } else if (eventName === 'call.ended') {
+      finishAudioCall(false, 'The audio call ended.');
+    }
+  }
 
   useEffect(() => {
     for (const [key, value] of [
@@ -542,6 +736,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => () => {
     for (const transfer of fileTransfersRef.current.values()) transfer.close();
+    audioCallSessionRef.current?.close();
     for (const file of Object.values(receivedFilesRef.current)) URL.revokeObjectURL(file.url);
   }, []);
 
@@ -679,8 +874,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           ['received', 'declined', 'cancelled', 'failed', 'expired'].includes(item.file.status)
         ) {
           sourceFilesRef.current.delete(item.file.fileId);
-          sourceBuffersRef.current.delete(item.file.fileId);
           fileInfoRef.current.delete(item.file.fileId);
+          fileTransfersRef.current.get(item.file.fileId)?.close();
+          fileTransfersRef.current.delete(item.file.fileId);
         }
       }
       const persistedIds = new Set(response.messages.map((item) => item.clientMsgId));
@@ -831,6 +1027,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     const unsubscribe = subscribeOrbitEvents((envelope) => {
+      if (envelope.event.startsWith('call.')) {
+        handleAudioCallEvent(envelope.event, envelope.data);
+      }
       if (envelope.event === 'message.new' || envelope.event === 'message.created') {
         const event = envelope.data as { payload?: EncryptedMessage };
         const newMessage = event.payload;
@@ -901,6 +1100,19 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     if (connection !== 'connected') attemptedMessagesRef.current.clear();
+  }, [connection]);
+
+  useEffect(() => {
+    if (!audioCall || audioCall.phase !== 'ringing') return;
+    const timer = window.setTimeout(() => {
+      finishAudioCall(true, 'The audio call was not answered.');
+    }, 45_000);
+    return () => window.clearTimeout(timer);
+  }, [audioCall?.callId, audioCall?.phase]);
+
+  useEffect(() => {
+    if (connection === 'connected' || !audioCallRef.current) return;
+    finishAudioCall(false, 'The call ended because the secure connection was lost.');
   }, [connection]);
 
   useEffect(() => {
@@ -1150,6 +1362,21 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           setThreadError(error instanceof Error ? error.message : 'The file arrived, but its status could not be updated.');
         });
         setNotice('File received and verified. It is only stored in this browser.');
+        window.setTimeout(() => {
+          fileTransfersRef.current.get(fileId)?.close();
+          fileTransfersRef.current.delete(fileId);
+        }, 5_000);
+      },
+      onSent: () => {
+        setFileProgress((current) => ({
+          ...current,
+          [fileId]: { transferred: size, total: size, verified: true },
+        }));
+        sourceFilesRef.current.delete(fileId);
+        fileInfoRef.current.delete(fileId);
+        fileTransfersRef.current.get(fileId)?.close();
+        fileTransfersRef.current.delete(fileId);
+        setNotice('File transfer completed and verified by the recipient.');
       },
       onError: (error) => {
         setFileProgress((current) => ({
@@ -1163,6 +1390,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         void updateFileStatus(conversationId, fileId, 'failed').catch((statusError: unknown) => {
           setThreadError(statusError instanceof Error ? statusError.message : error.message);
         });
+        sourceFilesRef.current.delete(fileId);
+        fileInfoRef.current.delete(fileId);
+        fileTransfersRef.current.delete(fileId);
       },
     });
     fileTransfersRef.current.set(fileId, transfer);
@@ -1174,9 +1404,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     setFileSending(true);
     setThreadError('');
     try {
-      const content = await file.arrayBuffer();
-      const digest = await crypto.subtle.digest('SHA-256', content);
-      const sha256 = encodeBase64(digest);
+      if (!Number.isSafeInteger(file.size)) throw new Error('This browser cannot safely transfer a file of this size.');
+      const sha256 = await hashFile(file, (processed, total) => {
+        if (processed === total || processed % (16 * 1024 * 1024) === 0) {
+          setNotice(`Preparing encrypted file offer · ${Math.floor((processed / total) * 100)}%`);
+        }
+      });
       const fileId = crypto.randomUUID();
       const clientMsgId = crypto.randomUUID();
       const encryptedMessage = await encryptMessage(deviceIdentity, selected, 'Shared a file');
@@ -1206,7 +1439,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         sha256,
       });
       sourceFilesRef.current.set(fileId, file);
-      sourceBuffersRef.current.set(fileId, content);
       fileInfoRef.current.set(fileId, {
         size: file.size,
         mime: file.type || 'application/octet-stream',
@@ -1229,6 +1461,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     const size = Number(item.file.size);
     if (!Number.isSafeInteger(size) || size < 0) {
       setThreadError('This file offer has an invalid size.');
+      return;
+    }
+    if (!supportsFileSize(size)) {
+      setThreadError('This browser cannot receive files larger than 64 MB. Use an up-to-date browser with site storage enabled.');
       return;
     }
     try {
@@ -1280,7 +1516,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       fileTransfersRef.current.get(item.file.fileId)?.close();
       fileTransfersRef.current.delete(item.file.fileId);
       sourceFilesRef.current.delete(item.file.fileId);
-      sourceBuffersRef.current.delete(item.file.fileId);
       fileInfoRef.current.delete(item.file.fileId);
       void refreshThread();
     } catch (error) {
@@ -1330,10 +1565,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   async function handleFileSignal(conversationId: string, signal: PeerFileSignal) {
     if (signal.type === 'accept') {
       const file = sourceFilesRef.current.get(signal.fileId);
-      const source = sourceBuffersRef.current.get(signal.fileId);
       const info = fileInfoRef.current.get(signal.fileId);
       const conversation = conversationsRef.current.find(({ id }) => id === conversationId);
-      if (!file || !source || !info || !conversation || !deviceIdentity) {
+      if (!file || !info || !conversation || !deviceIdentity) {
         setFileProgress((current) => ({
           ...current,
           [signal.fileId]: { transferred: 0, total: info?.size ?? 0, error: 'The original file is no longer available in this browser.' },
@@ -1357,7 +1591,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           key,
         );
         await updateFileStatus(conversationId, signal.fileId, 'transferring');
-        await transfer.startSender(source);
+        await transfer.startSender(file);
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Could not start the direct file transfer.';
         setFileProgress((current) => ({
@@ -1469,9 +1703,14 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         hasOlderMessages={hasOlderMessages}
         loadingOlderMessages={loadingOlderMessages}
         detailsOpen={detailsOpen}
+        audioCallDisabled={Boolean(audioCall) || !deviceIdentity || peerBlocked || connection !== 'connected'}
+        audioCallLabel={audioCall
+          ? audioCall.peerId === selected.peer.id ? 'Call in progress' : 'Another call is active'
+          : 'Start audio call'}
         onBack={() => setSelectedId(null)}
         onToggleNavigation={() => setNavigationCollapsed((collapsed) => !collapsed)}
         onToggleDetails={() => setDetailsOpen((open) => !open)}
+        onStartAudioCall={() => void startAudioCall()}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
         onRetryThread={() => void refreshThread()}
@@ -1497,6 +1736,16 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       {message && <p className="form-message home-message" role="alert">{message}</p>}
       {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
     </section>
+
+    {audioCall && <AudioCallPanel
+      call={audioCall}
+      remoteStream={remoteAudioStream}
+      onAccept={acceptAudioCall}
+      onDecline={() => finishAudioCall(true)}
+      onCancel={() => finishAudioCall(true)}
+      onHangup={() => finishAudioCall(true)}
+      onToggleMute={toggleAudioMute}
+    />}
 
     {selected && detailsOpen && <>
       <button

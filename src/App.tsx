@@ -25,6 +25,7 @@ import {
 } from './auth/keyStore';
 import './auth/auth.css';
 import './auth/chat.css';
+import './auth/workspace.css';
 
 const AuthenticatedHome = lazy(() => import('./auth/AuthenticatedHome'));
 

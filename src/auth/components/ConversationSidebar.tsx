@@ -14,7 +14,9 @@ interface ConversationSidebarProps {
   error: string;
   connection: OrbitConnectionState;
   connectionError: string;
+  collapsed: boolean;
   onSelect: (id: string) => void;
+  onToggleCollapsed: () => void;
   onRetryConversations: () => void;
   onRetryConnection: () => void;
   onFindSomeone: () => void;
@@ -48,7 +50,9 @@ export function ConversationSidebar({
   error,
   connection,
   connectionError,
+  collapsed,
   onSelect,
+  onToggleCollapsed,
   onRetryConversations,
   onRetryConnection,
   onFindSomeone,
@@ -63,6 +67,16 @@ export function ConversationSidebar({
 
   return <aside className="orbit-sidebar" aria-label="Orbit navigation">
     <a className="home-brand" href="/" aria-label="Orbit home"><OrbitMark /> orbit<span>.</span></a>
+    <button
+      className="orbit-sidebar-toggle"
+      type="button"
+      onClick={onToggleCollapsed}
+      aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+      aria-pressed={collapsed}
+      title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+    >
+      <OrbitIcon name={collapsed ? 'expand' : 'collapse'} size={17} />
+    </button>
     <div className="orbit-sidebar-heading">
       <span className="orbit-list-title">Conversations</span>
       <div className="orbit-add-wrap">

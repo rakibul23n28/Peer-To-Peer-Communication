@@ -37,7 +37,10 @@ interface ConversationThreadProps {
   messageListRef: RefObject<HTMLElement | null>;
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
+  detailsOpen: boolean;
   onBack: () => void;
+  onToggleNavigation: () => void;
+  onToggleDetails: () => void;
   onBlock: () => void;
   onUnblock: () => void;
   onRetryThread: () => void;
@@ -104,7 +107,10 @@ export function ConversationThread({
   messageListRef,
   hasOlderMessages,
   loadingOlderMessages,
+  detailsOpen,
   onBack,
+  onToggleNavigation,
+  onToggleDetails,
   onBlock,
   onUnblock,
   onRetryThread,
@@ -140,6 +146,20 @@ export function ConversationThread({
         <div className="orbit-thread-meta"><span>@{conversation.peer.username}</span><span className={`orbit-connection-pill${connection === 'connected' ? ' is-connected' : ''}`}><i />{connection === 'connected' ? 'Secure link' : 'Reconnecting'}</span></div>
       </div>
       <div className="orbit-thread-actions">
+        <button className="orbit-workspace-nav-toggle" type="button" onClick={onToggleNavigation} aria-label="Toggle navigation" title="Toggle navigation">
+          <OrbitIcon name="collapse" />
+        </button>
+        <button
+          className={`orbit-details-toggle${detailsOpen ? ' is-active' : ''}`}
+          type="button"
+          onClick={onToggleDetails}
+          aria-label={detailsOpen ? 'Hide conversation details' : 'Show conversation details'}
+          aria-expanded={detailsOpen}
+          aria-controls="orbit-details-panel"
+        >
+          <OrbitIcon name="settings" />
+          <span>Details</span>
+        </button>
         {!peerBlocked && <button className="orbit-thread-block" type="button" title="Block contact" aria-label="Block contact" onClick={onBlock}>
           <OrbitIcon name="shield" />
         </button>}
@@ -179,7 +199,7 @@ export function ConversationThread({
           }
           return groups;
         }, []);
-        return <div className="orbit-message-row" key={item.id}>
+        return <div className="orbit-message-row" key={item.id} id={`orbit-message-${item.id}`} tabIndex={-1}>
           {showDay && <div className="orbit-day-divider"><span>{dayLabel(item.createdAt)}</span></div>}
           <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}${item.sendState ? ` is-${item.sendState}` : ''}${item.kind === 'file' ? ' is-file-message' : ''}`}>
             {item.replyToId && <span className="orbit-reply-caption">REPLY TO / {item.replyToId.slice(0, 8)}</span>}

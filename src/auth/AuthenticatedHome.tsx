@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import {
   addMessageReceipt,
   blockUser,
@@ -38,6 +38,23 @@ import { ConversationThread, type FileTransferProgress, type ThreadMessage } fro
 import { ConversationSidebar } from './components/ConversationSidebar';
 import { EmptyConversationState } from './components/EmptyConversationState';
 import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
+import { WorkspaceDetails } from './components/WorkspaceDetails';
+
+type WorkspaceTheme = 'dark' | 'light';
+type WorkspaceDensity = 'comfortable' | 'compact';
+
+function readWorkspacePreference(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readWorkspaceWidth(key: string, fallback: number, min: number, max: number): number {
+  const saved = Number(readWorkspacePreference(key, String(fallback)));
+  return Number.isFinite(saved) ? Math.min(max, Math.max(min, saved)) : fallback;
+}
 
 interface AuthenticatedHomeProps {
   user: UserIdentity;
@@ -190,6 +207,29 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [notice, setNotice] = useState('');
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
   const [threadError, setThreadError] = useState('');
+  const [navigationCollapsed, setNavigationCollapsed] = useState(
+    () => readWorkspacePreference('orbit-navigation-collapsed', 'false') === 'true',
+  );
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [workspaceTheme, setWorkspaceTheme] = useState<WorkspaceTheme>(
+    () => readWorkspacePreference('orbit-theme', 'dark') === 'light' ? 'light' : 'dark',
+  );
+  const [workspaceDensity, setWorkspaceDensity] = useState<WorkspaceDensity>(
+    () => readWorkspacePreference('orbit-density', 'comfortable') === 'compact' ? 'compact' : 'comfortable',
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(
+    () => readWorkspaceWidth('orbit-sidebar-width', 270, 220, 360),
+  );
+  const [detailsWidth, setDetailsWidth] = useState(
+    () => readWorkspaceWidth('orbit-details-width', 310, 260, 400),
+  );
+  const workspaceLayoutStyle: CSSProperties & Record<
+    '--orbit-sidebar-width' | '--orbit-details-width',
+    string
+  > = {
+    '--orbit-sidebar-width': `${navigationCollapsed ? 72 : sidebarWidth}px`,
+    '--orbit-details-width': `${selectedId && detailsOpen ? detailsWidth : 0}px`,
+  };
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -225,6 +265,32 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const sourceFilesRef = useRef(new Map<string, File>());
   const sourceBuffersRef = useRef(new Map<string, ArrayBuffer>());
   const fileInfoRef = useRef(new Map<string, { size: number; mime: string; sha256: string; recipientKeyVersion: number }>());
+
+  useEffect(() => {
+    for (const [key, value] of [
+      ['orbit-navigation-collapsed', String(navigationCollapsed)],
+      ['orbit-theme', workspaceTheme],
+      ['orbit-density', workspaceDensity],
+      ['orbit-sidebar-width', String(sidebarWidth)],
+      ['orbit-details-width', String(detailsWidth)],
+    ]) {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        setNotice('Workspace preferences could not be saved in this browser.');
+        break;
+      }
+    }
+  }, [detailsWidth, navigationCollapsed, sidebarWidth, workspaceDensity, workspaceTheme]);
+
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDetailsOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [detailsOpen]);
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -592,13 +658,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         )));
       if (loadId !== threadLoadIdRef.current) return;
       setThreadMessages((current) => {
-        const existingMessages = current.filter((item) =>
-          item.conversationId === conversation.id && !item.sendState,
+        const messages = new Map(
+          current
+            .filter((item) => item.conversationId === conversation.id)
+            .map((item) => [item.clientMsgId, item]),
         );
-        return [
-          ...existingMessages,
-          ...pending,
-        ];
+        for (const item of pending) {
+          if (!messages.has(item.clientMsgId)) messages.set(item.clientMsgId, item);
+        }
+        return [...messages.values()];
       });
 
       const response = await getMessages(conversation.id);
@@ -641,8 +709,23 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           : [];
         const merged = new Map<string, ThreadMessage>();
         for (const item of retainedOlder) merged.set(item.id, item);
+        for (const item of current) {
+          if (
+            item.conversationId === conversation.id &&
+            item.sendState &&
+            !persistedIds.has(item.clientMsgId)
+          ) {
+            merged.set(item.id, item);
+          }
+        }
         for (const item of decrypted) merged.set(item.id, item);
-        for (const item of pending.filter((message) => !persistedIds.has(message.clientMsgId)).map((item) => ({
+        const mergedClientIds = new Set(
+          [...merged.values()].map((item) => item.clientMsgId),
+        );
+        for (const item of pending.filter((message) =>
+          !persistedIds.has(message.clientMsgId) &&
+          !mergedClientIds.has(message.clientMsgId),
+        ).map((item) => ({
           ...item,
           sendState: flushingMessagesRef.current.has(item.clientMsgId)
             ? 'sending' as const
@@ -857,11 +940,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
             hasRecipientKeyVersion: Number.isInteger(item.recipientKeyVersion),
           });
         }
-        void requestOrbitEvent('message.send', messageEventPayload(item), item.clientMsgId)
-          .then(() => {
+        void requestOrbitEvent<{ messageId: string; seq: string }>(
+          'message.send',
+          messageEventPayload(item),
+          item.clientMsgId,
+        )
+          .then((ack) => {
             setThreadMessages((current) => current.map((message) =>
               message.clientMsgId === item.clientMsgId
-                ? { ...message, sendState: 'sent', sendError: undefined }
+                ? { ...message, seq: ack.seq, sendState: 'sent', sendError: undefined }
                 : message,
             ));
             void refreshThread();
@@ -1321,7 +1408,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
   }
 
-  return <main className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}`}>
+  return <main
+    className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}${navigationCollapsed ? ' is-navigation-collapsed' : ''}`}
+    data-theme={workspaceTheme}
+    data-density={workspaceDensity}
+    style={workspaceLayoutStyle}
+  >
     <ConversationSidebar
       user={user}
       busy={busy}
@@ -1332,7 +1424,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       error={conversationError}
       connection={connection}
       connectionError={connectionError}
+      collapsed={navigationCollapsed}
       onSelect={selectConversation}
+      onToggleCollapsed={() => setNavigationCollapsed((collapsed) => !collapsed)}
       onRetryConversations={() => void loadConversations()}
       onRetryConnection={retryOrbitSocket}
       onFindSomeone={() => setDialog('search')}
@@ -1374,7 +1468,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         messageListRef={messageListRef}
         hasOlderMessages={hasOlderMessages}
         loadingOlderMessages={loadingOlderMessages}
+        detailsOpen={detailsOpen}
         onBack={() => setSelectedId(null)}
+        onToggleNavigation={() => setNavigationCollapsed((collapsed) => !collapsed)}
+        onToggleDetails={() => setDetailsOpen((open) => !open)}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
         onRetryThread={() => void refreshThread()}
@@ -1400,6 +1497,35 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       {message && <p className="form-message home-message" role="alert">{message}</p>}
       {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
     </section>
+
+    {selected && detailsOpen && <>
+      <button
+        className="orbit-details-backdrop"
+        type="button"
+        aria-label="Close conversation details"
+        onClick={() => setDetailsOpen(false)}
+      />
+      <WorkspaceDetails
+        conversation={selected}
+        user={user}
+        messages={threadMessages}
+        theme={workspaceTheme}
+        density={workspaceDensity}
+        sidebarWidth={sidebarWidth}
+        panelWidth={detailsWidth}
+        onThemeChange={setWorkspaceTheme}
+        onDensityChange={setWorkspaceDensity}
+        onSidebarWidthChange={setSidebarWidth}
+        onPanelWidthChange={setDetailsWidth}
+        onClose={() => setDetailsOpen(false)}
+        onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
+        onJumpToMessage={(id) => {
+          const target = document.getElementById(`orbit-message-${id}`);
+          target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target?.focus({ preventScroll: true });
+        }}
+      />
+    </>}
 
     {notice && <div className="orbit-toast" role="status">{notice}</div>}
 

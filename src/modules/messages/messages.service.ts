@@ -10,8 +10,13 @@ export class MessagesService {
     private readonly repository: MessagesRepository,
   ) {}
 
-  list(conversationId: string, userId: string, cursor?: string) {
-    return this.repository.list(conversationId, userId, cursor)
+  list(
+    conversationId: string,
+    userId: string,
+    cursor?: string,
+    limit?: number,
+  ) {
+    return this.repository.list(conversationId, userId, cursor, limit)
   }
 
   create(conversationId: string, userId: string, input: NewMessage) {

@@ -931,7 +931,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         ...(replyTo ? { replyToId: replyTo } : {}),
       };
       const createdAt = new Date().toISOString();
-      await saveLocalMessage({ clientMsgId, conversationId: selected.id, plaintext, createdAt });
       const storageKey = `orbit-outbox:${user.id}`;
       const outbox = readOutbox(storageKey);
       if (!outbox.some((item) => item.clientMsgId === clientMsgId)) outbox.push(queued);
@@ -963,6 +962,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         decryptedReactions: [],
         sendState: connection === 'connected' ? 'sending' : 'queued',
       }]);
+      try {
+        await saveLocalMessage({ clientMsgId, conversationId: selected.id, plaintext, createdAt });
+      } catch {
+        setNotice('Message queued, but this browser could not save its local plaintext cache.');
+      }
     } catch (error) {
       setThreadError(error instanceof Error ? error.message : 'Could not send this encrypted message.');
     } finally {

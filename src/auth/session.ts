@@ -424,8 +424,11 @@ export function createConversation(peerId: string): Promise<{ conversation: { id
 export function getMessages(
   conversationId: string,
   cursor?: string | null,
+  limit = 30,
 ): Promise<{ messages: EncryptedMessage[]; nextCursor: string | null }> {
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  const query = `?${params.toString()}`;
   return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/messages${query}`)
 }
 

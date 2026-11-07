@@ -84,6 +84,8 @@ export class MessagesController {
     conversationId: string,
 
     cursor?: string,
+
+    limit?: string,
   ) {
     z.string().uuid().parse(conversationId)
 
@@ -92,7 +94,18 @@ export class MessagesController {
         throw badRequest("INVALID_CURSOR", "Message cursor is invalid")
     }
 
-    return this.messages.list(conversationId, request.userId, cursor)
+    const pageSize = limit === undefined ? 30 : Number(limit)
+    if (
+      limit !== undefined &&
+      (!/^\d+$/.test(limit) ||
+        !Number.isSafeInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 50)
+    ) {
+      throw badRequest("INVALID_LIMIT", "Message page size is invalid")
+    }
+
+    return this.messages.list(conversationId, request.userId, cursor, pageSize)
   }
 
   async create(
@@ -243,6 +256,7 @@ applyMethodDecorator(Get(), "list")
 applyParameterDecorator(Req(), "list", 0)
 applyParameterDecorator(Param("conversationId"), "list", 1)
 applyParameterDecorator(Query("cursor"), "list", 2)
+applyParameterDecorator(Query("limit"), "list", 3)
 
 applyMethodDecorator(Post(), "create")
 applyParameterDecorator(Req(), "create", 0)

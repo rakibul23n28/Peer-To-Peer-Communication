@@ -40,7 +40,12 @@ export class MessagesRepository {
     private readonly conversations: ConversationsRepository,
   ) {}
 
-  async list(conversationId: string, userId: string, cursor?: string) {
+  async list(
+    conversationId: string,
+    userId: string,
+    cursor?: string,
+    limit = 30,
+  ) {
     await this.conversations.getMemberConversation(conversationId, userId)
 
     const cursorSeq = cursor ? BigInt(cursor) : undefined
@@ -62,12 +67,12 @@ export class MessagesRepository {
 
       orderBy: { seq: "desc" },
 
-      take: 51,
+      take: limit + 1,
     })
 
-    const hasMore = rows.length > 50
+    const hasMore = rows.length > limit
 
-    const page = rows.slice(0, 50).reverse()
+    const page = rows.slice(0, limit).reverse()
 
     return {
       messages: page.map(serializeMessage),
@@ -94,8 +99,6 @@ export class MessagesRepository {
         return serializeMessage(prior)
       }
 
-      await lockConversation(tx, conversationId, senderId)
-
       if (input.replyToId) {
         const reply = await tx.message.findFirst({
           where: { id: input.replyToId, conversationId },
@@ -110,6 +113,7 @@ export class MessagesRepository {
         UPDATE conversations
            SET last_seq = last_seq + 1
          WHERE id = ${conversationId}::uuid
+           AND (user_a = ${senderId}::uuid OR user_b = ${senderId}::uuid)
          RETURNING last_seq
       `
       if (!updatedConversation) throw notFound("Conversation not found")
@@ -156,7 +160,7 @@ export class MessagesRepository {
     input: { ciphertext: Buffer; iv: Buffer; keyVersion: number },
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId, senderId)
+      await lockMessage(tx, conversationId, messageId, senderId)
 
       const message = await tx.message.findFirst({
         where: { id: messageId, conversationId, senderId, deletedAt: null },
@@ -185,7 +189,7 @@ export class MessagesRepository {
     status: ReceiptStatus,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId, userId)
+      await lockMessage(tx, conversationId, messageId, userId)
 
       const message = await tx.message.findFirst({
         where: { id: messageId, conversationId, deletedAt: null },
@@ -219,7 +223,7 @@ export class MessagesRepository {
     iv: Buffer,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId, userId)
+      await lockMessage(tx, conversationId, messageId, userId)
 
       const message = await tx.message.findFirst({
         where: { id: messageId, conversationId, deletedAt: null },
@@ -252,7 +256,7 @@ export class MessagesRepository {
     userId: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId, userId)
+      await lockMessage(tx, conversationId, messageId, userId)
 
       const message = await tx.message.findFirst({
         where: { id: messageId, conversationId },
@@ -270,7 +274,7 @@ export class MessagesRepository {
 
   async tombstone(conversationId: string, messageId: string, senderId: string) {
     return this.prisma.$transaction(async (tx) => {
-      await lockConversation(tx, conversationId, senderId)
+      await lockMessage(tx, conversationId, messageId, senderId)
 
       const message = await tx.message.findFirst({
         where: { id: messageId, conversationId, senderId, deletedAt: null },
@@ -323,6 +327,25 @@ export async function lockConversation(
   }
 
   return conversation
+}
+
+async function lockMessage(
+  tx: Prisma.TransactionClient,
+  conversationId: string,
+  messageId: string,
+  userId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT m.id
+      FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+     WHERE m.id = ${messageId}::uuid
+       AND m.conversation_id = ${conversationId}::uuid
+       AND (c.user_a = ${userId}::uuid OR c.user_b = ${userId}::uuid)
+     FOR UPDATE OF m
+  `
+
+  if (!rows[0]) throw notFound("Message not found")
 }
 
 function serializeMessage(

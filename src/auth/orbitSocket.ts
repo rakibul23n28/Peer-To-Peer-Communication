@@ -1,4 +1,5 @@
 import { getAccessToken, refreshAccessToken, subscribeAuth } from './session';
+import { socketUrl } from './urls';
 
 export type OrbitConnectionState = 'connected' | 'reconnecting' | 'offline' | 'connecting' | 'auth_failed' | 'idle';
 export interface OrbitEnvelope {
@@ -50,20 +51,8 @@ export function normalizeOrbitMessage(raw: unknown): OrbitEnvelope {
   throw new Error('Invalid WebSocket envelope.');
 }
 
-function socketUrl(): string {
-  const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
-  const path = `${apiBase}/ws`;
-  if (/^https?:\/\//.test(path)) {
-    const url = new URL(path);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
-  }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}${path.startsWith('/') ? path : `/${path}`}`;
-}
-
-function socketProtocols(token: string | null): string[] {
-  return token ? ['orbit.v1', `orbit.token.${token}`] : ['orbit.v1'];
+function socketProtocols(): string[] {
+  return ['orbit.v1'];
 }
 
 function scheduleReconnect(error = '') {
@@ -105,7 +94,7 @@ async function connect(currentGeneration: number) {
   }
 
   try {
-    const ws = new WebSocket(socketUrl(), socketProtocols(token));
+    const ws = new WebSocket(socketUrl(), socketProtocols());
     socket = ws;
     ws.addEventListener('open', () => {
       if (socket !== ws || stopped) return;

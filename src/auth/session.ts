@@ -1,3 +1,5 @@
+import { apiBase } from "./urls"
+
 export interface ApiErrorEnvelope {
   error?: {
     code?: string
@@ -107,8 +109,6 @@ type AuthMessage = { type: "access-token"; token: string } | {
 } | { type: "session-expired" }
 
 type AuthListener = (message: AuthMessage) => void
-
-const apiBase = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "")
 
 const listeners = new Set<AuthListener>()
 

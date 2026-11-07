@@ -24,6 +24,8 @@ import { HttpException } from "@nestjs/common"
 
 import { WebSocket, WebSocketServer as WsServer } from "ws"
 
+import { env } from "../../config/env.js"
+
 import { AuthService } from "../auth/auth.service.js"
 
 import { ConversationsService } from "../conversations/conversations.service.js"
@@ -848,7 +850,43 @@ type LegacyPropertyDecorator = (target: object, propertyKey: string | symbol) =>
 const gatewayTarget = OrbitGateway as unknown as Function
 const gatewayPrototype = OrbitGateway.prototype
 
-;(WebSocketGateway({ path: "/v1/ws", maxPayload: 128 * 1024 }) as unknown as LegacyClassDecorator)(gatewayTarget)
+const verifyWebSocketClient = (
+  info: { origin: string },
+  callback: (verified: boolean, code?: number, message?: string) => void,
+): void => {
+  const allowedOrigins = (env.CORS_ORIGIN || "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter(Boolean)
+  const isLocalDevelopmentOrigin = (origin: string): boolean => {
+    if (env.NODE_ENV === "production") return false
+
+    try {
+      const parsedOrigin = new URL(origin)
+      return (
+        ["http:", "https:"].includes(parsedOrigin.protocol) &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(parsedOrigin.hostname)
+      )
+    } catch {
+      return false
+    }
+  }
+  const verified = info.origin
+    ? allowedOrigins.includes(info.origin) || isLocalDevelopmentOrigin(info.origin)
+    : env.NODE_ENV !== "production"
+
+  callback(
+    verified,
+    verified ? undefined : 403,
+    verified ? undefined : "Origin not allowed",
+  )
+}
+
+;(WebSocketGateway({
+  path: "/v1/ws",
+  maxPayload: 128 * 1024,
+  verifyClient: verifyWebSocketClient,
+}) as unknown as LegacyClassDecorator)(gatewayTarget)
 ;(WebSocketServer() as unknown as LegacyPropertyDecorator)(gatewayPrototype, "server")
 
 const constructorTarget = OrbitGateway as unknown as object

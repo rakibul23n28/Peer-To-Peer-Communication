@@ -14,8 +14,9 @@ try {
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.string().default("development"),
-    API_PORT: z.coerce.number().default(3000),
+    NODE_ENV: z.enum(["development", "test", "production"]),
+    PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     AUTH_COOKIE_PATH: z.string().default("/api/auth"),
     LOG_LEVEL: z.string().default("info"),
     JWT_SECRET: z
@@ -28,13 +29,15 @@ export const envSchema = z
       .default("development-only-cookie-secret-not-production"),
     DATABASE_URL: z
       .string()
+      .min(1, "DATABASE_URL is required")
       .url()
       .refine((value) => {
+        if (!URL.canParse(value)) return false
         const protocol = new URL(value).protocol
         return protocol === "postgres:" || protocol === "postgresql:"
-      }, "DATABASE_URL must be a PostgreSQL connection string")
-      .optional(),
+      }, "DATABASE_URL must be a PostgreSQL connection string"),
     DIRECT_URL: z.string().url().optional(),
+    CORS_ORIGIN: z.string().default(""),
     REDIS_URL: z.string().default("redis://localhost:6379"),
     TURN_URLS: z.string().default(""),
     TURN_SHARED_SECRET: z.string().default("").refine(
@@ -44,6 +47,42 @@ export const envSchema = z
     TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
   })
   .superRefine((value, context) => {
+    const corsOrigins = value.CORS_ORIGIN
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/+$/, ""))
+      .filter(Boolean)
+
+    for (const origin of corsOrigins) {
+      try {
+        const parsedOrigin = new URL(origin)
+        if (
+          parsedOrigin.origin !== origin ||
+          !["http:", "https:"].includes(parsedOrigin.protocol)
+        ) {
+          throw new Error("Origin must contain only scheme and host")
+        }
+      } catch {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["CORS_ORIGIN"],
+          message:
+            "CORS_ORIGIN must be comma-separated HTTP(S) origins without paths or wildcards",
+        })
+        break
+      }
+    }
+
+    if (value.DIRECT_URL && URL.canParse(value.DIRECT_URL)) {
+      const directProtocol = new URL(value.DIRECT_URL).protocol
+      if (directProtocol !== "postgres:" && directProtocol !== "postgresql:") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["DIRECT_URL"],
+          message: "DIRECT_URL must be a PostgreSQL connection string",
+        })
+      }
+    }
+
     const turnUrls = value.TURN_URLS.split(",").map((url) => url.trim()).filter(Boolean)
     if (Boolean(turnUrls.length) !== Boolean(value.TURN_SHARED_SECRET)) {
       context.addIssue({
@@ -80,13 +119,24 @@ export const envSchema = z
         message: "COOKIE_SECRET must be rotated for production",
       })
     }
-    if (!value.DATABASE_URL) {
+    if (!value.CORS_ORIGIN.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["DATABASE_URL"],
-        message: "DATABASE_URL is required in production",
+        path: ["CORS_ORIGIN"],
+        message: "CORS_ORIGIN is required in production",
       })
-    } else if (
+    }
+    if (
+      value.JWT_SECRET === value.COOKIE_SECRET
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["COOKIE_SECRET"],
+        message: "COOKIE_SECRET must differ from JWT_SECRET",
+      })
+    }
+    if (
+      !URL.canParse(value.DATABASE_URL) ||
       !["require", "verify-ca", "verify-full"].includes(
         new URL(value.DATABASE_URL).searchParams.get("sslmode") ?? "",
       )
@@ -97,8 +147,31 @@ export const envSchema = z
         message: "DATABASE_URL must require TLS in production",
       })
     }
+    if (
+      value.DIRECT_URL &&
+      (!URL.canParse(value.DIRECT_URL) ||
+        !["require", "verify-ca", "verify-full"].includes(
+          new URL(value.DIRECT_URL).searchParams.get("sslmode") ?? "",
+        ))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DIRECT_URL"],
+        message: "DIRECT_URL must require TLS in production",
+      })
+    }
   })
 
 export type Env = z.infer<typeof envSchema>
 
-export const env = envSchema.parse(process.env)
+const parsedEnv = envSchema.safeParse(process.env)
+
+if (!parsedEnv.success) {
+  const details = parsedEnv.error.issues
+    .map((issue) => `${issue.path.join(".") || "environment"}: ${issue.message}`)
+    .join("\n")
+  console.error(`Invalid server environment configuration:\n${details}`)
+  throw new Error("Server environment validation failed.")
+}
+
+export const env = parsedEnv.data

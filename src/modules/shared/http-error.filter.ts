@@ -13,6 +13,8 @@ import type { Request, Response } from "express"
 
 import { ZodError } from "zod"
 
+import { env } from "../../config/env.js"
+
 @Catch()
 export class HttpErrorFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpErrorFilter.name)
@@ -116,13 +118,14 @@ export class HttpErrorFilter implements ExceptionFilter {
           ? exception.code
           : "none"
       const errorMessage =
-        exception instanceof TypeError ||
-        (exception instanceof Prisma.PrismaClientKnownRequestError &&
-          exception.code === "P2028")
+        env.NODE_ENV !== "production" &&
+        (exception instanceof TypeError ||
+          (exception instanceof Prisma.PrismaClientKnownRequestError &&
+            exception.code === "P2028"))
           ? exception.message.replace(/[\r\n]+/g, " ").slice(0, 240)
           : undefined
       const errorLocation =
-        exception instanceof Error
+        env.NODE_ENV !== "production" && exception instanceof Error
           ? exception.stack?.split("\n").slice(1, 3).join(" <- ")
           : undefined
       this.logger.error(

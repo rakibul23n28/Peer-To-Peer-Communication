@@ -23,7 +23,15 @@ export class HealthController {
     return { status: "ok" }
   }
 
+  async healthCheck(request: Request, response: Response) {
+    return this.databaseHealth(request, response)
+  }
+
   async readyz(request: Request, response: Response) {
+    return this.databaseHealth(request, response)
+  }
+
+  private async databaseHealth(request: Request, response: Response) {
     try {
       await this.health.checkDatabase()
 
@@ -46,7 +54,7 @@ export class HealthController {
 
 // Apply Nest's legacy decorators explicitly so this file also type-checks
 // when TypeScript's standard decorator mode is enabled.
-;(Controller("v1") as unknown as (target: Function) => void)(HealthController)
+;(Controller() as unknown as (target: Function) => void)(HealthController)
 ;(Inject(HealthRepository) as unknown as (
   target: Function,
   propertyKey: string | symbol | undefined,
@@ -58,21 +66,40 @@ const healthzDescriptor = Object.getOwnPropertyDescriptor(
   healthControllerPrototype,
   "healthz",
 )!
+const healthDescriptor = Object.getOwnPropertyDescriptor(
+  healthControllerPrototype,
+  "healthCheck",
+)!
 const readyzDescriptor = Object.getOwnPropertyDescriptor(
   healthControllerPrototype,
   "readyz",
 )!
 
-;(Get("healthz") as unknown as (
+;(Get("v1/healthz") as unknown as (
   target: object,
   propertyKey: string,
   descriptor: PropertyDescriptor,
 ) => void)(healthControllerPrototype, "healthz", healthzDescriptor)
-;(Get("readyz") as unknown as (
+;(Get("v1/readyz") as unknown as (
   target: object,
   propertyKey: string,
   descriptor: PropertyDescriptor,
 ) => void)(healthControllerPrototype, "readyz", readyzDescriptor)
+;(Get("health") as unknown as (
+  target: object,
+  propertyKey: string,
+  descriptor: PropertyDescriptor,
+) => void)(healthControllerPrototype, "healthCheck", healthDescriptor)
+;(Req() as unknown as (
+  target: object,
+  propertyKey: string | symbol | undefined,
+  parameterIndex: number,
+) => void)(healthControllerPrototype, "healthCheck", 0)
+;(Res() as unknown as (
+  target: object,
+  propertyKey: string | symbol | undefined,
+  parameterIndex: number,
+) => void)(healthControllerPrototype, "healthCheck", 1)
 ;(Req() as unknown as (
   target: object,
   propertyKey: string | symbol | undefined,

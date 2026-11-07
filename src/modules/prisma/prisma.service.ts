@@ -15,7 +15,13 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name)
 
   constructor() {
-    super({ log: [] })
+    super({
+      log: [],
+      transactionOptions: {
+        maxWait: 10_000,
+        timeout: 15_000,
+      },
+    })
   }
 
   async onModuleInit(): Promise<void> {

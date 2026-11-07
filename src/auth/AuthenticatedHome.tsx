@@ -42,8 +42,11 @@ import { EmptyConversationState } from './components/EmptyConversationState';
 import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
 import { WorkspaceDetails } from './components/WorkspaceDetails';
 
-type WorkspaceTheme = 'dark' | 'light';
-type WorkspaceMessageLayout = 'list' | 'bubbles';
+type WorkspaceAppearance = 'storybook' | 'minimal' | 'watercolor' | 'anime' | 'midnight';
+
+function isWorkspaceAppearance(value: string): value is WorkspaceAppearance {
+  return ['storybook', 'minimal', 'watercolor', 'anime', 'midnight'].includes(value);
+}
 
 function readWorkspacePreference(key: string, fallback: string): string {
   try {
@@ -209,11 +212,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     () => readWorkspacePreference('orbit-navigation-collapsed', 'false') === 'true',
   );
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [workspaceTheme, setWorkspaceTheme] = useState<WorkspaceTheme>(
-    () => readWorkspacePreference('orbit-theme', 'light') === 'dark' ? 'dark' : 'light',
-  );
-  const [workspaceMessageLayout, setWorkspaceMessageLayout] = useState<WorkspaceMessageLayout>(
-    () => readWorkspacePreference('orbit-message-layout', 'list') === 'bubbles' ? 'bubbles' : 'list',
+  const [workspaceAppearance, setWorkspaceAppearance] = useState<WorkspaceAppearance>(
+    () => {
+      const saved = readWorkspacePreference('orbit-appearance', '');
+      if (isWorkspaceAppearance(saved)) return saved;
+      return readWorkspacePreference('orbit-theme', 'light') === 'dark' ? 'midnight' : 'storybook';
+    },
   );
   const workspaceLayoutStyle: CSSProperties & Record<
     '--orbit-sidebar-width' | '--orbit-details-width',
@@ -453,8 +457,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   useEffect(() => {
     for (const [key, value] of [
       ['orbit-navigation-collapsed', String(navigationCollapsed)],
-      ['orbit-theme', workspaceTheme],
-      ['orbit-message-layout', workspaceMessageLayout],
+      ['orbit-appearance', workspaceAppearance],
     ]) {
       try {
         localStorage.setItem(key, value);
@@ -463,7 +466,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         break;
       }
     }
-  }, [navigationCollapsed, workspaceMessageLayout, workspaceTheme]);
+  }, [navigationCollapsed, workspaceAppearance]);
 
   useEffect(() => {
     if (!detailsOpen) return;
@@ -1654,8 +1657,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   return <main
     className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}${navigationCollapsed ? ' is-navigation-collapsed' : ''}`}
-    data-theme={workspaceTheme}
-    data-message-layout={workspaceMessageLayout}
+    data-theme={workspaceAppearance === 'midnight' ? 'dark' : 'light'}
+    data-appearance={workspaceAppearance}
     style={workspaceLayoutStyle}
   >
     <ConversationSidebar
@@ -1770,10 +1773,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         conversation={selected}
         user={user}
         messages={threadMessages}
-        theme={workspaceTheme}
-        messageLayout={workspaceMessageLayout}
-        onThemeChange={setWorkspaceTheme}
-        onMessageLayoutChange={setWorkspaceMessageLayout}
+        appearance={workspaceAppearance}
+        onAppearanceChange={setWorkspaceAppearance}
         onClose={() => setDetailsOpen(false)}
         onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
         onJumpToMessage={(id) => {

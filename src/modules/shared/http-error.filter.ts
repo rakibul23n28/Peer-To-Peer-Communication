@@ -72,6 +72,12 @@ export class HttpErrorFilter implements ExceptionFilter {
         code = "NOT_FOUND"
 
         message = "The requested record was not found"
+      } else if (exception.code === "P2028") {
+        status = HttpStatus.SERVICE_UNAVAILABLE
+
+        code = "DATABASE_TRANSACTION_FAILED"
+
+        message = "The database operation could not be completed. Please retry."
       }
     } else if (exception instanceof Prisma.PrismaClientInitializationError) {
       status = HttpStatus.SERVICE_UNAVAILABLE
@@ -110,7 +116,9 @@ export class HttpErrorFilter implements ExceptionFilter {
           ? exception.code
           : "none"
       const errorMessage =
-        exception instanceof TypeError
+        exception instanceof TypeError ||
+        (exception instanceof Prisma.PrismaClientKnownRequestError &&
+          exception.code === "P2028")
           ? exception.message.replace(/[\r\n]+/g, " ").slice(0, 240)
           : undefined
       const errorLocation =

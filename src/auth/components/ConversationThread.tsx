@@ -296,20 +296,22 @@ export function ConversationThread({
             </div> : <p className={item.decryptionError ? 'orbit-message-undecryptable' : undefined} title={item.decryptionError}>
               {item.decryptionError ? 'Encrypted message · key unavailable on this device' : item.plaintext}
             </p>}
-            <footer><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
-              {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' ? 'Queued' : item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
-                {item.sendState === 'failed'
-                  ? <><OrbitIcon name="close" size={13} /><span className="orbit-visually-hidden">Could not send</span></>
-                  : item.sendState === 'queued' || item.sendState === 'sending'
-                    ? <><span className="orbit-sending-indicator" /><span className="orbit-visually-hidden">{item.sendState === 'queued' ? 'Queued' : 'Sending'}</span></>
-                    : item.receipts.some((entry) => entry.status === 'read')
-                      ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Seen</span></>
-                      : item.receipts.some((entry) => entry.status === 'delivered')
-                        ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Delivered</span></>
-                        : <><OrbitIcon name="check" size={14} /><span className="orbit-visually-hidden">Sent</span></>}
-              </span>}
-            </footer>
-            {reactionGroups.length > 0 && <div className="orbit-reaction-list" aria-label="Message reactions">
+            <div className="orbit-message-meta-row">
+              <footer>
+                {item.senderId === user.id && <span className="orbit-message-status" title={item.sendState === 'failed' ? "Couldn't send" : item.sendState === 'queued' ? 'Queued' : item.sendState === 'sending' ? 'Sending' : item.receipts.some((entry) => entry.status === 'read') ? 'Seen' : item.receipts.some((entry) => entry.status === 'delivered') ? 'Delivered' : 'Sent'}>
+                  {item.sendState === 'failed'
+                    ? <><OrbitIcon name="close" size={13} /><span className="orbit-visually-hidden">Could not send</span></>
+                    : item.sendState === 'queued' || item.sendState === 'sending'
+                      ? <><span className="orbit-sending-indicator" /><span className="orbit-visually-hidden">{item.sendState === 'queued' ? 'Queued' : 'Sending'}</span></>
+                      : item.receipts.some((entry) => entry.status === 'read')
+                        ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Seen</span></>
+                        : item.receipts.some((entry) => entry.status === 'delivered')
+                          ? <><OrbitIcon name="checkDouble" size={14} /><span className="orbit-visually-hidden">Delivered</span></>
+                          : <><OrbitIcon name="check" size={14} /><span className="orbit-visually-hidden">Sent</span></>}
+                </span>}
+                <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.editedAt ? ' · edited' : ''}</time>
+              </footer>
+              {reactionGroups.length > 0 && <div className="orbit-reaction-list" aria-label="Message reactions">
               {reactionGroups.map((reaction) => <button
                 className={`orbit-reaction-pill${reaction.mine ? ' is-mine' : ''}`}
                 type="button"
@@ -323,23 +325,24 @@ export function ConversationThread({
                 {reaction.value === '❤️' ? <OrbitIcon name="heart" size={13} /> : <span>{reaction.value}</span>}
                 <span>{reaction.count}</span>
               </button>)}
-            </div>}
+              </div>}
+              {!item.deletedAt && <div className="orbit-message-actions" aria-label="Message actions">
+                {item.senderId === user.id && !item.sendState && <>
+                  <button type="button" title="Edit message" aria-label="Edit message" disabled={!conversation.peer.keyAvailable} onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
+                  <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
+                </>}
+                <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
+                {(() => {
+                  const hasHeart = item.decryptedReactions.some((reaction) => reaction.userId === user.id && reaction.value === '❤️');
+                  return <button className={`orbit-heart-action${hasHeart ? ' is-active' : ''}`} type="button" title={hasHeart ? 'Remove heart reaction' : 'React with heart'} aria-label={hasHeart ? 'Remove your heart reaction' : 'React with heart'} aria-pressed={hasHeart} onClick={() => onReact(item, '❤️')}>
+                    <OrbitIcon name="heart" size={15} />
+                  </button>;
+                })()}
+              </div>}
+            </div>
             {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
               <span>{item.sendError ?? 'Could not send this message.'}</span>
               <button type="button" disabled={!conversation.peer.keyAvailable} onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
-            </div>}
-            {!item.deletedAt && <div className="orbit-message-actions" aria-label="Message actions">
-              {item.senderId === user.id && !item.sendState && <>
-                <button type="button" title="Edit message" aria-label="Edit message" disabled={!conversation.peer.keyAvailable} onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
-                <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
-              </>}
-              <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
-              {(() => {
-                const hasHeart = item.decryptedReactions.some((reaction) => reaction.userId === user.id && reaction.value === '❤️');
-                return <button className={`orbit-heart-action${hasHeart ? ' is-active' : ''}`} type="button" title={hasHeart ? 'Remove heart reaction' : 'React with heart'} aria-label={hasHeart ? 'Remove your heart reaction' : 'React with heart'} aria-pressed={hasHeart} onClick={() => onReact(item, '❤️')}>
-                  <OrbitIcon name="heart" size={15} />
-                </button>;
-              })()}
             </div>}
           </article>
         </div>;

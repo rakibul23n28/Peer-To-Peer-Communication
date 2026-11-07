@@ -56,11 +56,11 @@ function AuthStory() {
       <span className="story-firefly story-firefly--two" />
     </div>
     <div className="story-copy">
-      <p className="eyebrow"><span /> A LITTLE WORLD OF YOUR OWN</p>
-      <h2>Good things grow together.</h2>
-      <p>A calm, private corner for the people who make your days brighter. Your keys stay yours; your messages stay private.</p>
+      <p className="eyebrow"><span /> PRIVATE, BY NATURE</p>
+      <h2>Your people, closer.</h2>
+      <p>Encrypted conversations, in a quieter little space.</p>
     </div>
-    <div className="story-footer"><span>PRIVATE BY NATURE</span><span>MADE FOR YOUR PEOPLE</span></div>
+    <div className="story-footer"><span>END-TO-END ENCRYPTED</span><span>JUST FOR YOU</span></div>
   </aside>;
 }
 
@@ -484,9 +484,9 @@ export default function App() {
   return <main className="auth-screen auth-screen--auth">
     <AuthStory />
     <section className="auth-card" aria-labelledby="auth-title">
-    <div className="auth-card-top"><span className="eyebrow">YOUR SPACE IS WAITING</span><span className="auth-lock" aria-label="Encrypted session"><span /> PRIVATE</span></div>
-    <h1 id="auth-title">{isRegister ? 'Make room for your people.' : 'Good to have you back.'}</h1>
-    <p>{isRegister ? 'A small, private world starts with you.' : 'Sign in to return to your conversations.'}</p>
+    <div className="auth-card-top"><span className="eyebrow">ORBIT ACCOUNT</span><span className="auth-lock" aria-label="Encrypted session"><span /> PRIVATE</span></div>
+    <h1 id="auth-title">{isRegister ? 'Create account' : 'Welcome back'}</h1>
+    <p>{isRegister ? 'A private space for your conversations.' : 'Sign in to continue.'}</p>
     <form onSubmit={submit} noValidate>
       <label htmlFor="username">Username</label>
       <input id="username" name="username" autoComplete="username" autoCapitalize="none" placeholder="your.name" required minLength={3} maxLength={32} pattern="[a-z0-9_.]+" />

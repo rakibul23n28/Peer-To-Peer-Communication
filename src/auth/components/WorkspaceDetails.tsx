@@ -4,17 +4,25 @@ import type { ConversationSummary, UserIdentity } from '../session';
 import { OrbitIcon } from './OrbitIcon';
 import { initials } from './OrbitMark';
 
-type Theme = 'dark' | 'light';
-type MessageLayout = 'list' | 'bubbles';
+type Appearance = 'storybook' | 'minimal' | 'watercolor' | 'anime' | 'midnight';
+const appearances: Array<{ value: Appearance; label: string; detail: string; icon: 'tree' | 'list' | 'water' | 'spark' | 'moon' }> = [
+  { value: 'storybook', label: 'Storybook', detail: 'Garden', icon: 'tree' },
+  { value: 'minimal', label: 'Minimal', detail: 'Paper', icon: 'list' },
+  { value: 'watercolor', label: 'Watercolor', detail: 'Wash', icon: 'water' },
+  { value: 'anime', label: 'Anime', detail: 'Magic', icon: 'spark' },
+  { value: 'midnight', label: 'Midnight', detail: 'Dark', icon: 'moon' },
+];
+
+function isAppearance(value: string): value is Appearance {
+  return appearances.some((appearance) => appearance.value === value);
+}
 
 interface WorkspaceDetailsProps {
   conversation: ConversationSummary;
   user: UserIdentity;
   messages: ThreadMessage[];
-  theme: Theme;
-  messageLayout: MessageLayout;
-  onThemeChange: (theme: Theme) => void;
-  onMessageLayoutChange: (layout: MessageLayout) => void;
+  appearance: Appearance;
+  onAppearanceChange: (appearance: Appearance) => void;
   onClose: () => void;
   onCopyFingerprint: () => void;
   onJumpToMessage: (id: string) => void;
@@ -33,10 +41,8 @@ export function WorkspaceDetails({
   conversation,
   user,
   messages,
-  theme,
-  messageLayout,
-  onThemeChange,
-  onMessageLayoutChange,
+  appearance,
+  onAppearanceChange,
   onClose,
   onCopyFingerprint,
   onJumpToMessage,
@@ -113,20 +119,25 @@ export function WorkspaceDetails({
 
       <section className="orbit-details-section" aria-labelledby="orbit-layout-title">
         <h3 id="orbit-layout-title"><OrbitIcon name="settings" size={15} />Workspace</h3>
-        <div className="orbit-choice-row">
-          <span>Appearance</span>
-          <div className="orbit-segmented-control" role="group" aria-label="Color theme">
-            <button type="button" aria-pressed={theme === 'dark'} onClick={() => onThemeChange('dark')}><OrbitIcon name="moon" size={14} /><span>Dark</span></button>
-            <button type="button" aria-pressed={theme === 'light'} onClick={() => onThemeChange('light')}><OrbitIcon name="sun" size={14} /><span>Light</span></button>
+        <fieldset className="orbit-appearance-picker">
+          <legend>Chat appearance</legend>
+          <div className="orbit-appearance-options">
+            {appearances.map((option) => <button
+              className={`orbit-appearance-option is-${option.value}`}
+              type="button"
+              key={option.value}
+              aria-pressed={appearance === option.value}
+              aria-label={`${option.label}, ${option.detail}`}
+              title={`${option.label} · ${option.detail}`}
+              onClick={() => {
+                if (isAppearance(option.value)) onAppearanceChange(option.value);
+              }}
+            >
+              <OrbitIcon name={option.icon} size={17} />
+              <span>{option.label}</span>
+            </button>)}
           </div>
-        </div>
-        <div className="orbit-choice-row">
-          <span>Message layout</span>
-          <div className="orbit-segmented-control" role="group" aria-label="Message layout">
-            <button type="button" aria-pressed={messageLayout === 'list'} onClick={() => onMessageLayoutChange('list')}>List</button>
-            <button type="button" aria-pressed={messageLayout === 'bubbles'} onClick={() => onMessageLayoutChange('bubbles')}>Bubbles</button>
-          </div>
-        </div>
+        </fieldset>
       </section>
     </div>
   </aside>;

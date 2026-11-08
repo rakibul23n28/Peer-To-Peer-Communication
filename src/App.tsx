@@ -163,11 +163,17 @@ export default function App() {
 
   useEffect(() => {
     const updatePath = () => {
-      setPath(window.location.pathname);
-      if (window.location.pathname === '/register') setMode('register');
-      else if (window.location.pathname === '/login') setMode('login');
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/' && currentPath !== '/login' && currentPath !== '/register') {
+        navigate('/', true);
+        return;
+      }
+      setPath(currentPath);
+      if (currentPath === '/register') setMode('register');
+      else if (currentPath === '/login') setMode('login');
     };
     window.addEventListener('popstate', updatePath);
+    updatePath();
     return () => window.removeEventListener('popstate', updatePath);
   }, []);
 

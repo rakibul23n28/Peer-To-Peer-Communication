@@ -419,15 +419,19 @@ export class AuthService {
 export function cookieHeader(token: string): string {
   const maxAge = refreshTokenTtlDays * 24 * 60 * 60
 
-  const secure = env.NODE_ENV === "production" ? "; Secure" : ""
+  const production = env.NODE_ENV === "production"
+  const secure = production ? "; Secure" : ""
+  const sameSite = production ? "None" : "Strict"
 
-  return `${refreshCookieName}=${token}; Path=${env.AUTH_COOKIE_PATH}; Max-Age=${maxAge}; HttpOnly; SameSite=Strict${secure}`
+  return `${refreshCookieName}=${token}; Path=${env.AUTH_COOKIE_PATH}; Max-Age=${maxAge}; HttpOnly; SameSite=${sameSite}${secure}`
 }
 
 export function clearCookieHeader(): string {
-  const secure = env.NODE_ENV === "production" ? "; Secure" : ""
+  const production = env.NODE_ENV === "production"
+  const secure = production ? "; Secure" : ""
+  const sameSite = production ? "None" : "Strict"
 
-  return `${refreshCookieName}=; Path=${env.AUTH_COOKIE_PATH}; Max-Age=0; HttpOnly; SameSite=Strict${secure}`
+  return `${refreshCookieName}=; Path=${env.AUTH_COOKIE_PATH}; Max-Age=0; HttpOnly; SameSite=${sameSite}${secure}`
 }
 
 export function refreshCookie(request: {

@@ -32,6 +32,18 @@ The images below are served from the repository's `public/` directory and show t
 - **Responsive workspace:** compact conversation navigation, message history, and composer are designed to adapt across screen sizes.
 - **Local-first support:** browser-side storage supports device identity and local message caching; private keys are handled in the client.
 
+### File-transfer network requirements
+
+The API stores the encrypted file offer and coordinates the connection; the file bytes travel between the two browsers over an encrypted WebRTC data channel. STUN alone cannot connect peers on every mobile carrier, office, school, or restrictive Wi-Fi network. If the file card says the peer connection failed and no TURN relay is configured, add a TURN relay on the Render API service:
+
+- `TURN_URLS`: comma-separated relay URLs, for example `turn:turn.example.net:3478?transport=udp,turn:turn.example.net:3478?transport=tcp,turns:turn.example.net:5349?transport=tcp` (use the actual URLs and ports supplied by your relay provider).
+- For coturn REST/shared-secret authentication, set `TURN_SHARED_SECRET` to the private relay secret. Orbit generates short-lived credentials; `TURN_CREDENTIAL_TTL_SECONDS` optionally controls their lifetime (default `600`).
+- For a provider that supplies a username and password, set `TURN_USERNAME` and `TURN_CREDENTIAL` to those values instead. Configure only one credential mode. Keep them out of source control and frontend build variables.
+
+The authenticated API endpoint supplies the configured TURN credentials to the WebRTC clients for both file transfers and audio calls. After setting the variables, redeploy/restart the API and retry. TURN may relay encrypted WebRTC traffic when a direct peer path is unavailable; the application server still does not receive file contents or call audio.
+
+Large-file receiving uses browser disk-backed storage when available. Browsers without that storage support are limited to 64 MiB per received file; available storage quota and the recipient device's resources can impose a lower practical limit. The sender and recipient both need a working WebRTC route, and the recipient must keep the conversation open until verification completes.
+
 > **Privacy note:** Orbit is designed so message plaintext is encrypted in the browser before it is sent to the server. Keep account credentials and device identity material private, use HTTPS/WSS in production, and review the implementation and deployment configuration before relying on the application for sensitive communications.
 
 ## Technology
@@ -46,7 +58,7 @@ The images below are served from the repository's `public/` directory and show t
 | Peer-to-peer media and files | WebRTC (`RTCPeerConnection`, data channels) |
 | Browser persistence | IndexedDB via Dexie, with browser key storage |
 | Validation | Zod |
-| Hosting configuration | Render Blueprint for a Node web service and static frontend |
+| Hosting configuration | Render Blueprint for the combined Node API and frontend service |
 
 ## Architecture at a glance
 
@@ -112,7 +124,7 @@ Start the Vite frontend in another terminal:
 npm run dev
 ```
 
-The Vite development server proxies API and WebSocket traffic to `API_PORT` (default `3000`). Open the local address printed by Vite (the current configuration defaults to port `8443`). For a separately hosted API, set `VITE_API_URL` and `VITE_WS_URL` to its HTTP and WebSocket endpoints.
+The Vite development server proxies API and WebSocket traffic to `API_PORT` (default `3000`). Open the local address printed by Vite (the current configuration defaults to port `8443`). For local development with a separately hosted API, set `VITE_API_URL` and `VITE_WS_URL`; the production Render build intentionally leaves them unset so the app, API, and WebSocket share one origin.
 
 ## Useful commands
 
@@ -130,7 +142,7 @@ The Vite development server proxies API and WebSocket traffic to `API_PORT` (def
 
 ## Deployment (Render)
 
-The root `render.yaml` defines an `orbit-api` Node web service and an `orbit-web` static site. The API build runs `prisma migrate deploy`; review pending migrations and take a database backup before the first deployment. Do not use `prisma migrate reset` or force-reset commands on an existing database.
+The root `render.yaml` defines one `orbit-api` Node web service that builds and serves both the API and frontend from the same origin. This avoids cross-site refresh-cookie restrictions in browsers such as iPhone Safari. The app is available at the API service URL (currently `https://orbit-api-pr3d.onrender.com`); the separate `orbit-web` static site is no longer used. The build runs `prisma migrate deploy`; review pending migrations and take a database backup before deploying. Do not use `prisma migrate reset` or force-reset commands on an existing database.
 
 ### Environment variables
 
@@ -140,23 +152,20 @@ The root `render.yaml` defines an `orbit-api` Node web service and an `orbit-web
 | `orbit-api` | `DIRECT_URL` | Direct/non-pooled PostgreSQL URL from the same provider for Prisma migrations; use the direct URL also if the provider has no pooler. |
 | `orbit-api` | `JWT_SECRET` | Random, private value with at least 32 characters. Generate independently; never reuse a development or cookie secret. |
 | `orbit-api` | `COOKIE_SECRET` | A second, independent random private value with at least 32 characters. |
-| `orbit-api` | `CORS_ORIGIN` | Exact frontend origin, e.g. `https://orbit-web.onrender.com`; multiple origins may be comma-separated. No paths or `*`. |
+| `orbit-api` | `CORS_ORIGIN` | Exact app/API origin, e.g. `https://orbit-api-pr3d.onrender.com`; multiple origins may be comma-separated. No paths or `*`. |
 | `orbit-api` | `NODE_ENV` | Set by the Blueprint to `production`. |
-| `orbit-api` | `AUTH_COOKIE_PATH` | Set by the Blueprint to `/v1/auth`; this matches the direct API URL used by the Render web client. |
+| `orbit-api` | `AUTH_COOKIE_PATH` | Set by the Blueprint to `/v1/auth`. |
 | `orbit-api` | `NODE_VERSION` | Set by the Blueprint to `22`. |
-| `orbit-web` | `VITE_API_URL` | Public API origin, e.g. `https://orbit-api.onrender.com` (no trailing slash; `/v1` is added automatically). |
-| `orbit-web` | `VITE_WS_URL` | Public WebSocket URL, e.g. `wss://orbit-api.onrender.com/v1/ws`. Production requires `wss://`. |
 
-Set secrets and provider URLs in the Render dashboard; do not put real values in `render.yaml`, `.env.example`, or source control. Optional `TURN_URLS` and `TURN_SHARED_SECRET` can be set on the API for TURN relay credentials; configure both together. `TURN_CREDENTIAL_TTL_SECONDS` defaults to 600.
+Do not set `VITE_API_URL` or `VITE_WS_URL` on the Render service: production builds deliberately use relative same-origin `/v1` and `/v1/ws` endpoints. Set `CORS_ORIGIN` to the exact API/app origin. Set secrets and provider URLs in the Render dashboard; do not put real values in `render.yaml`, `.env.example`, or source control. Optional TURN uses `TURN_URLS` plus either `TURN_SHARED_SECRET` (coturn REST) or both `TURN_USERNAME` and `TURN_CREDENTIAL` (static provider credentials); do not configure both authentication modes. `TURN_CREDENTIAL_TTL_SECONDS` applies to coturn REST credentials and defaults to 600.
 
 ### Existing database and deployment order
 
 1. Confirm the target database and take a provider-managed backup. Inspect the existing `_prisma_migrations` history and compare the schema with `prisma/schema.prisma` and the checked-in migrations. The app does not automatically verify that a database has the expected schema.
 2. **Baseline only when required:** if this existing database already contains the schema from `20261025160000_init` but has no Prisma migration history, and you have confirmed the schema matches that migration, run `npm run db:migrate:baseline:legacy` against that database once. It records the initial migration as applied; it does not create the schema. Skip this step if migration history already exists. Never baseline an empty or mismatched database.
 3. Before allowing the API Blueprint build to run, review each pending migration and the effects it will have on the existing data. The legacy transition migration includes cleanup of reactions and file transfers for already-deleted messages, among other schema/data transitions. `npm run db:verify` checks stored-data invariants after migration; it is not a full schema introspection tool.
-4. Enter the API and frontend environment values in Render before building either service; production Vite builds intentionally fail if API or WebSocket URLs are missing or insecure. Create/deploy `orbit-api` first with the database URLs, generated secrets, initial `CORS_ORIGIN`, and `AUTH_COOKIE_PATH=/v1/auth`. The Blueprint build executes `npm run db:migrate:deploy` after generating Prisma and compiling the API.
-5. After the API is healthy, deploy `orbit-web` with `VITE_API_URL` and `VITE_WS_URL`. The static site rewrites `/*` to `/index.html` for client-side routing.
-6. Copy the final public `orbit-web` origin into the API's `CORS_ORIGIN` (comma-separated if needed) and redeploy/restart the API. Confirm `/health` is healthy and test sign-in, refresh, and an authenticated WebSocket connection.
+4. Configure the `orbit-api` service with the database URLs, generated secrets, `CORS_ORIGIN` set to the API's public Render URL, and `AUTH_COOKIE_PATH=/v1/auth`. Remove any previously configured `VITE_API_URL` or `VITE_WS_URL` values from the API service. Deploy the Blueprint; its build generates Prisma, builds the frontend into `dist`, compiles the API, and runs `npm run db:migrate:deploy`.
+5. Open the app at the `orbit-api` service URL (currently `https://orbit-api-pr3d.onrender.com`). The previous `orbit-web` static site URL is not the application URL for this same-origin setup; retire that service after confirming the combined API/app is healthy. Confirm sign-in, refresh, and an authenticated WebSocket connection on desktop and iPhone Safari.
 
 To run the one-time baseline manually, use the same carefully verified `DATABASE_URL`/`DIRECT_URL` environment that targets the existing database; do not paste credentials into shell history or commit them.
 
@@ -164,6 +173,6 @@ To run the one-time baseline manually, use the same carefully verified `DATABASE
 
 - API fails during startup with environment validation: check the required server variables, PostgreSQL URL/TLS settings, and that both secrets are independent random values of at least 32 characters.
 - API health returns `503`: inspect Render API logs and database availability/connection limits. `/health` executes `SELECT 1`.
-- Browser reports CORS errors: set `CORS_ORIGIN` to the exact web origin (scheme and host only), then restart the API.
-- WebSocket fails: ensure `VITE_WS_URL` is the API's `wss://.../v1/ws` endpoint, its origin is included in `CORS_ORIGIN`, and the browser has a valid signed-in session.
-- Static routes return `404`: confirm the `/*` to `/index.html` rewrite is present and the publish directory is `dist`.
+- Browser reports CORS errors: set `CORS_ORIGIN` to the exact API/app origin (scheme and host only), then restart the API.
+- WebSocket fails: confirm the app and API are opened at the same service origin and the browser has a valid signed-in session.
+- Static routes return `404`: confirm the API build completed `npm run build` and the `dist/` output was included in the deployed service.

@@ -40,6 +40,8 @@ export const envSchema = z
     CORS_ORIGIN: z.string().default(""),
     REDIS_URL: z.string().default("redis://localhost:6379"),
     TURN_URLS: z.string().default(""),
+    TURN_USERNAME: z.string().default(""),
+    TURN_CREDENTIAL: z.string().default(""),
     TURN_SHARED_SECRET: z.string().default("").refine(
       (value) => value.length === 0 || value.length >= 32,
       "TURN_SHARED_SECRET must be at least 32 characters",
@@ -84,11 +86,29 @@ export const envSchema = z
     }
 
     const turnUrls = value.TURN_URLS.split(",").map((url) => url.trim()).filter(Boolean)
-    if (Boolean(turnUrls.length) !== Boolean(value.TURN_SHARED_SECRET)) {
+    const hasStaticTurnCredentials = Boolean(value.TURN_USERNAME) && Boolean(value.TURN_CREDENTIAL)
+    if (Boolean(value.TURN_USERNAME) !== Boolean(value.TURN_CREDENTIAL)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_USERNAME"],
+        message: "TURN_USERNAME and TURN_CREDENTIAL must be configured together",
+      })
+    }
+    if (
+      Boolean(turnUrls.length) !==
+      Boolean(value.TURN_SHARED_SECRET || hasStaticTurnCredentials)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_URLS"],
+        message: "Configure TURN_URLS with either TURN_SHARED_SECRET or both TURN_USERNAME and TURN_CREDENTIAL",
+      })
+    }
+    if (value.TURN_SHARED_SECRET && hasStaticTurnCredentials) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["TURN_SHARED_SECRET"],
-        message: "TURN_URLS and TURN_SHARED_SECRET must be configured together",
+        message: "Use either TURN_SHARED_SECRET or static TURN_USERNAME/TURN_CREDENTIAL, not both",
       })
     }
     if (turnUrls.some((url) => !/^turns?:/i.test(url))) {

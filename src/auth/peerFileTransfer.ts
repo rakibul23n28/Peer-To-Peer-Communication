@@ -21,7 +21,7 @@ interface PeerFileTransferOptions {
   onError: (error: Error) => void;
 }
 
-const chunkSize = 32 * 1024;
+const chunkSize = 16 * 1024;
 const hashBlockSize = 4 * 1024 * 1024;
 const diskReceiveThreshold = 32 * 1024 * 1024;
 const maximumMemoryReceiveSize = 64 * 1024 * 1024;
@@ -177,8 +177,8 @@ export class PeerFileTransfer {
           return urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'));
         });
         this.fail(new Error(hasTurn
-          ? 'Peer connection failed. Check peer availability and relay credentials.'
-          : 'Peer connection failed. Add a TURN relay to support restrictive networks.'));
+          ? 'The peer connection failed. Check the TURN relay credentials, relay ports, and peer network.'
+          : 'The direct peer connection failed or was interrupted. Configure TURN_URLS and TURN_SHARED_SECRET on the API for restrictive or unstable networks.'));
       }
     };
   }
@@ -189,7 +189,11 @@ export class PeerFileTransfer {
     channel.bufferedAmountLowThreshold = 128 * 1024;
     channel.onopen = () => {
       this.options.onProgress(0, this.options.size);
-      if (sender && this.source) void this.transmit();
+      if (sender && this.source) {
+        void this.transmit().catch((error: unknown) => {
+          this.fail(error instanceof Error ? error : new Error('Could not send the encrypted file.'));
+        });
+      }
       if (!sender) {
         this.receiveReady = this.prepareReceiveStorage();
         void this.receiveReady.catch((error: unknown) => {
@@ -326,7 +330,7 @@ export class PeerFileTransfer {
       this.receiveWriter = null;
     }
     const blob = this.receiveFileHandle
-      ? new File([await this.receiveFileHandle.getFile()], this.options.fileId, { type: this.options.mime })
+      ? await this.receiveFileHandle.getFile()
       : new Blob(this.receivedChunks, { type: this.options.mime });
     this.completed = true;
     if (this.channel?.readyState === 'open') {
@@ -358,6 +362,9 @@ export class PeerFileTransfer {
 
   private async waitForBuffer(channel: RTCDataChannel): Promise<void> {
     if (channel.bufferedAmount < 256 * 1024) return;
+    if (channel.readyState !== 'open') {
+      throw new Error('The direct file-transfer channel closed.');
+    }
     await new Promise<void>((resolve, reject) => {
       const onLow = () => {
         channel.removeEventListener('bufferedamountlow', onLow);
@@ -371,6 +378,8 @@ export class PeerFileTransfer {
       };
       channel.addEventListener('bufferedamountlow', onLow, { once: true });
       channel.addEventListener('close', onClose, { once: true });
+      if (channel.readyState !== 'open') onClose();
+      else if (channel.bufferedAmount <= channel.bufferedAmountLowThreshold) onLow();
     });
   }
 

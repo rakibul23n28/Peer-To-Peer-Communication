@@ -59,10 +59,10 @@ export function AudioCallPanel({
   const status = call.phase === 'active'
     ? duration
     : call.phase === 'connecting'
-      ? 'Connecting securely…'
+      ? 'Connecting'
       : call.direction === 'incoming'
-        ? 'Incoming audio call'
-        : 'Calling…';
+        ? 'Incoming'
+        : 'Calling';
 
   async function acceptCall(): Promise<void> {
     if (accepting) return;
@@ -74,11 +74,8 @@ export function AudioCallPanel({
     }
   }
 
-  return <section className="orbit-audio-call" role="dialog" aria-modal="false" aria-label={`Audio call with ${call.peerName}`}>
+  return <section className="orbit-audio-call" role="group" aria-label={`Audio call with ${call.peerName}`}>
     <audio ref={audioRef} autoPlay aria-label={`Audio from ${call.peerName}`} />
-    <span className={`orbit-call-avatar${call.phase === 'active' ? ' is-active' : ''}`} aria-hidden="true">
-      {call.peerName.trim().slice(0, 1).toUpperCase()}
-    </span>
     <div className="orbit-call-copy" aria-live="polite">
       <strong>{call.peerName}</strong>
       <span>{status}</span>
@@ -86,7 +83,7 @@ export function AudioCallPanel({
     {audioBlocked && remoteStream && <button className="orbit-call-audio-enable" type="button" onClick={() => {
       const audio = audioRef.current;
       if (audio) void audio.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true));
-    }}>Enable audio</button>}
+    }}>Enable</button>}
     {call.phase === 'ringing' && call.direction === 'incoming' && <>
       <button className="orbit-call-control is-accept" type="button" onClick={() => void acceptCall()} disabled={accepting} aria-label={accepting ? 'Connecting to audio call' : 'Accept audio call'} title={accepting ? 'Connecting to audio call' : 'Accept audio call'}>
         <OrbitIcon name="phone" />

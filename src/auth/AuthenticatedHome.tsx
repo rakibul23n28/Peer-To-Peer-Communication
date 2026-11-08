@@ -35,7 +35,7 @@ import { getDeviceIdentity, getDeviceIdentityForVersion, getSavedDeviceIdentitie
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
 import { hashFile, PeerFileTransfer, supportsFileSize, type PeerFileSignal } from './peerFileTransfer';
 import { PeerAudioCall, type PeerAudioSignal } from './peerAudioCall';
-import { AudioCallPanel, type AudioCallView } from './components/AudioCallPanel';
+import type { AudioCallView } from './components/AudioCallPanel';
 import { ConversationThread, type FileTransferProgress, type ThreadMessage } from './components/ConversationThread';
 import { ConversationSidebar } from './components/ConversationSidebar';
 import { EmptyConversationState } from './components/EmptyConversationState';
@@ -1122,6 +1122,17 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }, [audioCall?.callId, audioCall?.phase]);
 
   useEffect(() => {
+    if (!audioCall || audioCall.phase !== 'connecting') return;
+    const callId = audioCall.callId;
+    const timer = window.setTimeout(() => {
+      if (audioCallRef.current?.callId === callId && audioCallRef.current.phase === 'connecting') {
+        finishAudioCall(true, 'The audio call could not connect. Check microphone access and network connectivity; some networks require a TURN relay.');
+      }
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [audioCall?.callId, audioCall?.phase]);
+
+  useEffect(() => {
     if (connection === 'connected' || !audioCallRef.current) return;
     finishAudioCall(false, 'The call ended because the secure connection was lost.');
   }, [connection]);
@@ -1716,6 +1727,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         hasOlderMessages={hasOlderMessages}
         loadingOlderMessages={loadingOlderMessages}
         detailsOpen={detailsOpen}
+        audioCall={audioCall}
+        remoteAudioStream={remoteAudioStream}
         audioCallDisabled={Boolean(audioCall) || !deviceIdentity || !selected.peer.keyAvailable || peerBlocked || connection !== 'connected'}
         audioCallLabel={audioCall
           ? audioCall.peerId === selected.peer.id ? 'Call in progress' : 'Another call is active'
@@ -1726,6 +1739,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         onRefreshPeerKey={() => void refreshPeerKey()}
         refreshingPeerKey={refreshingPeerKey}
         onStartAudioCall={() => void startAudioCall()}
+        onAcceptAudioCall={acceptAudioCall}
+        onDeclineAudioCall={() => finishAudioCall(true)}
+        onCancelAudioCall={() => finishAudioCall(true)}
+        onHangupAudioCall={() => finishAudioCall(true)}
+        onToggleAudioMute={toggleAudioMute}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
         onRetryThread={() => void refreshThread()}
@@ -1751,16 +1769,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       {message && <p className="form-message home-message" role="alert">{message}</p>}
       {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
     </section>
-
-    {audioCall && <AudioCallPanel
-      call={audioCall}
-      remoteStream={remoteAudioStream}
-      onAccept={acceptAudioCall}
-      onDecline={() => finishAudioCall(true)}
-      onCancel={() => finishAudioCall(true)}
-      onHangup={() => finishAudioCall(true)}
-      onToggleMute={toggleAudioMute}
-    />}
 
     {selected && detailsOpen && <>
       <button

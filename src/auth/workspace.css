@@ -299,22 +299,19 @@
 }
 
 .orbit-audio-call {
-  position: fixed;
-  z-index: 31;
-  right: 24px;
-  bottom: max(24px, env(safe-area-inset-bottom));
-  display: flex;
-  width: min(390px, calc(100vw - 32px));
-  min-height: 82px;
+  position: relative;
+  display: inline-flex;
+  width: auto;
+  max-width: 210px;
+  min-width: 0;
+  min-height: 34px;
   align-items: center;
-  gap: 13px;
-  padding: 14px;
+  gap: 5px;
+  padding: 2px 4px 2px 8px;
   border: 1px solid var(--orbit-border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--orbit-panel-raised) 94%, transparent);
-  box-shadow: var(--orbit-shadow);
-  backdrop-filter: blur(24px);
-  animation: orbit-call-enter .24s cubic-bezier(.2, .8, .2, 1) both;
+  border-radius: 12px;
+  background: var(--orbit-panel-raised);
+  box-shadow: none;
 }
 
 .orbit-audio-call audio {
@@ -344,26 +341,29 @@
   display: grid;
   min-width: 0;
   flex: 1;
-  gap: 3px;
+  gap: 1px;
 }
 
 .orbit-call-copy strong {
   overflow: hidden;
   color: var(--orbit-text);
-  font-size: 13px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .orbit-call-copy > span {
+  overflow: hidden;
   color: var(--orbit-muted);
-  font-size: 11px;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .orbit-call-control {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--orbit-border);
@@ -397,9 +397,10 @@
 
 .orbit-call-audio-enable {
   position: absolute;
-  right: 12px;
-  bottom: calc(100% + 8px);
-  padding: 8px 12px;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 2;
+  padding: 5px 8px;
   border: 1px solid var(--orbit-border);
   border-radius: 10px;
   background: var(--orbit-panel-raised);
@@ -1031,23 +1032,6 @@
 
   .orbit-thread-actions .orbit-audio-call-button span {
     display: none;
-  }
-
-  .orbit-audio-call {
-    right: 12px;
-    bottom: max(12px, env(safe-area-inset-bottom));
-    width: calc(100vw - 24px);
-    gap: 9px;
-    padding: 11px;
-  }
-
-  .orbit-call-copy strong {
-    font-size: 12px;
-  }
-
-  .orbit-call-control {
-    width: 36px;
-    height: 36px;
   }
 
   .orbit-details-panel {
@@ -2733,7 +2717,7 @@
 .orbit-call-copy strong {
   color: var(--orbit-text);
   font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  font-size: 16px;
+  font-size: 10px;
 }
 
 .orbit-call-copy > span {
@@ -3980,12 +3964,104 @@
 
 @media (max-width: 680px) {
   .orbit-account-menu {
-    right: auto;
-    bottom: 8px;
-    left: calc(100% + 6px);
-    min-width: 220px;
-    max-height: calc(100dvh - 24px);
+    position: fixed;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 12px;
+    width: auto;
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 420px;
+    max-height: min(60dvh, 360px);
     overflow-y: auto;
+    margin-inline: auto;
+    padding: 8px;
+    border-radius: 14px;
+    z-index: 40;
+  }
+
+  .orbit-account-version {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+  }
+
+  .orbit-account-fingerprint {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+    font-size: 9px;
+  }
+
+  .orbit-account-menu button {
+    min-height: 42px;
+    font-size: 12px;
+  }
+
+  .orbit-call-copy {
+    max-width: 90px;
+    gap: 2px;
+  }
+
+  .orbit-call-copy > span {
+    font-size: 9px;
+  }
+
+  .orbit-thread-actions .orbit-audio-call .orbit-call-control {
+    width: 27px;
+    height: 27px;
+    min-height: 27px;
+    padding: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .orbit-thread-header {
+    grid-template-columns: 28px 30px minmax(0, 1fr) auto;
+    gap: 3px;
+    padding-inline: 4px;
+  }
+
+  .orbit-thread-actions.has-audio-call .orbit-thread-block {
+    display: none;
+  }
+
+  .orbit-thread-back,
+  .orbit-thread-actions > button {
+    width: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+  }
+
+  .orbit-thread-person h1 {
+    font-size: 12px;
+  }
+
+  .orbit-thread-actions {
+    gap: 2px;
+  }
+
+  .orbit-audio-call {
+    gap: 2px;
+    padding-inline: 5px 3px;
+  }
+
+  .orbit-call-copy {
+    max-width: 48px;
+  }
+
+  .orbit-call-copy strong {
+    display: none;
+  }
+
+  .orbit-thread-actions .orbit-audio-call .orbit-call-control {
+    width: 25px;
+    height: 25px;
+    min-height: 25px;
   }
 }
 

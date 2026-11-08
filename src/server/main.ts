@@ -1,5 +1,7 @@
 import "reflect-metadata"
 
+import { resolve } from "node:path"
+
 import { NestFactory } from "@nestjs/core"
 
 import type { NestExpressApplication } from "@nestjs/platform-express"
@@ -91,6 +93,23 @@ app.use((request: Request, response: Response, next: NextFunction) => {
     response.setHeader("Cache-Control", "no-store")
 
   next()
+})
+
+const webRoot = resolve(process.cwd(), "dist")
+app.useStaticAssets(webRoot, { index: false })
+app.use((request: Request, response: Response, next: NextFunction) => {
+  if (
+    request.method !== "GET" ||
+    request.path === "/health" ||
+    request.path === "/v1" ||
+    request.path.startsWith("/v1/") ||
+    !request.accepts("html")
+  ) {
+    next()
+    return
+  }
+
+  response.sendFile(resolve(webRoot, "index.html"))
 })
 
 app.useWebSocketAdapter(new WsAdapter(app))

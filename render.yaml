@@ -3,7 +3,7 @@ services:
     name: orbit-api
     runtime: node
     plan: free
-    buildCommand: npm ci --include=dev && npm run prisma:generate && npm run build:server && npm run db:migrate:deploy
+    buildCommand: npm ci --include=dev && npm run prisma:generate && npm run build && npm run build:server && npm run db:migrate:deploy
     startCommand: npm run start:server
     healthCheckPath: /health
     envVars:
@@ -23,18 +23,13 @@ services:
         sync: false
       - key: AUTH_COOKIE_PATH
         value: /v1/auth
-
-  - type: web
-    name: orbit-web
-    runtime: static
-    buildCommand: npm ci --include=dev && npm run build
-    staticPublishPath: dist
-    envVars:
-      - key: VITE_API_URL
+      - key: TURN_URLS
         sync: false
-      - key: VITE_WS_URL
+      - key: TURN_USERNAME
         sync: false
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+      - key: TURN_CREDENTIAL
+        sync: false
+      - key: TURN_SHARED_SECRET
+        sync: false
+      - key: TURN_CREDENTIAL_TTL_SECONDS
+        value: "600"

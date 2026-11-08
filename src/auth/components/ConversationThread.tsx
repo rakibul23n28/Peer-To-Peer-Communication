@@ -3,6 +3,7 @@ import type { ConversationSummary, EncryptedMessage, UserIdentity } from '../ses
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitIcon } from './OrbitIcon';
 import { initials } from './OrbitMark';
+import { AudioCallPanel, type AudioCallView } from './AudioCallPanel';
 
 export type ThreadMessage = EncryptedMessage & {
   plaintext: string;
@@ -39,6 +40,8 @@ interface ConversationThreadProps {
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
   detailsOpen: boolean;
+  audioCall: AudioCallView | null;
+  remoteAudioStream: MediaStream | null;
   audioCallDisabled: boolean;
   audioCallLabel: string;
   onBack: () => void;
@@ -46,6 +49,11 @@ interface ConversationThreadProps {
   onToggleDetails: () => void;
   onRefreshPeerKey: () => void;
   onStartAudioCall: () => void;
+  onAcceptAudioCall: () => Promise<void>;
+  onDeclineAudioCall: () => void;
+  onCancelAudioCall: () => void;
+  onHangupAudioCall: () => void;
+  onToggleAudioMute: () => void;
   onBlock: () => void;
   onUnblock: () => void;
   onRetryThread: () => void;
@@ -114,6 +122,8 @@ export function ConversationThread({
   hasOlderMessages,
   loadingOlderMessages,
   detailsOpen,
+  audioCall,
+  remoteAudioStream,
   audioCallDisabled,
   audioCallLabel,
   onBack,
@@ -121,6 +131,11 @@ export function ConversationThread({
   onToggleDetails,
   onRefreshPeerKey,
   onStartAudioCall,
+  onAcceptAudioCall,
+  onDeclineAudioCall,
+  onCancelAudioCall,
+  onHangupAudioCall,
+  onToggleAudioMute,
   onBlock,
   onUnblock,
   onRetryThread,
@@ -153,13 +168,22 @@ export function ConversationThread({
       <span className="orbit-avatar orbit-thread-avatar">{initials(conversation.peer.displayName)}</span>
       <div className="orbit-thread-person">
         <h1>{conversation.peer.displayName}</h1>
-        <div className="orbit-thread-meta"><span>@{conversation.peer.username}</span><span className={`orbit-connection-pill${connection === 'connected' ? ' is-connected' : ''}`}><i />{connection === 'connected' ? 'Secure link' : 'Reconnecting'}</span></div>
       </div>
-      <div className="orbit-thread-actions">
-        <button className="orbit-audio-call-button" type="button" onClick={onStartAudioCall} disabled={audioCallDisabled} aria-label={audioCallLabel} title={audioCallLabel}>
-          <OrbitIcon name="phone" />
-          <span>{audioCallLabel}</span>
-        </button>
+      <div className={`orbit-thread-actions${audioCall ? ' has-audio-call' : ''}`}>
+        {audioCall
+          ? <AudioCallPanel
+              call={audioCall}
+              remoteStream={remoteAudioStream}
+              onAccept={onAcceptAudioCall}
+              onDecline={onDeclineAudioCall}
+              onCancel={onCancelAudioCall}
+              onHangup={onHangupAudioCall}
+              onToggleMute={onToggleAudioMute}
+            />
+          : <button className="orbit-audio-call-button" type="button" onClick={onStartAudioCall} disabled={audioCallDisabled} aria-label={audioCallLabel} title={audioCallLabel}>
+              <OrbitIcon name="phone" />
+              <span>{audioCallLabel}</span>
+            </button>}
         <button className="orbit-workspace-nav-toggle" type="button" onClick={onToggleNavigation} aria-label="Toggle navigation" title="Toggle navigation">
           <OrbitIcon name="collapse" />
         </button>

@@ -7,7 +7,9 @@ export const apiBase = configuredApiUrl
   ? configuredApiUrl.endsWith("/v1")
     ? configuredApiUrl
     : `${configuredApiUrl}/v1`
-  : "/api"
+  : import.meta.env.PROD
+    ? "/v1"
+    : "/api"
 
 export function socketUrl(): string {
   const configuredSocketUrl = import.meta.env.VITE_WS_URL?.trim()
@@ -16,7 +18,7 @@ export function socketUrl(): string {
     ? new URL(configuredSocketUrl, window.location.href)
     : configuredApiUrl
       ? new URL(`${apiBase}/ws`, window.location.href)
-      : new URL("/ws", window.location.href)
+      : new URL(import.meta.env.PROD ? "/v1/ws" : "/ws", window.location.href)
 
   if (url.protocol === "https:") url.protocol = "wss:"
 

@@ -13,28 +13,10 @@ export default defineConfig(({ mode }) => {
   const emitSourcemaps = mode === 'development'
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const apiPort = loadEnv(mode, process.cwd(), 'API_PORT').API_PORT || '3000'
-  if (mode === 'production' && (!env.VITE_API_URL || !env.VITE_WS_URL)) {
-    throw new Error('Production builds require VITE_API_URL and VITE_WS_URL.')
-  }
-  if (mode === 'production' && env.VITE_API_URL && env.VITE_WS_URL) {
-    const apiUrl = new URL(env.VITE_API_URL)
-    if (
-      apiUrl.protocol !== 'https:' ||
-      apiUrl.username ||
-      apiUrl.password ||
-      !['', '/', '/v1'].includes(apiUrl.pathname)
-    ) {
-      throw new Error(
-        'Production VITE_API_URL must be an HTTPS API origin, optionally ending in /v1.',
-      )
-    }
-
-    const socketUrl = new URL(env.VITE_WS_URL)
-    if (socketUrl.protocol !== 'wss:' || socketUrl.pathname !== '/v1/ws') {
-      throw new Error(
-        'Production VITE_WS_URL must use wss:// and the /v1/ws path.',
-      )
-    }
+  if (mode === 'production' && (env.VITE_API_URL || env.VITE_WS_URL)) {
+    throw new Error(
+      'Production builds use the same origin for the app, API, and WebSocket. Unset VITE_API_URL and VITE_WS_URL.',
+    )
   }
   const apiTarget = `http://127.0.0.1:${apiPort}`
 

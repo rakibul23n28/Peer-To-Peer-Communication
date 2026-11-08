@@ -20,7 +20,7 @@ export class SharedFoldersService {
       id: record.id,
       conversationId,
       ownerId: userId,
-      createdAt: record.createdAt.toISOString(),
+      createdAt: record.createdAt,
     })
     return record
   }

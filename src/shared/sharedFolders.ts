@@ -94,12 +94,42 @@ export interface SharedFolderRecord {
   revokedAt: string | null
 }
 
+function normalizeSerializedBytes(value: unknown, maxBytes: number): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("type" in value) ||
+    value.type !== "Buffer" ||
+    !("data" in value) ||
+    !Array.isArray(value.data) ||
+    value.data.length > maxBytes ||
+    !value.data.every((byte) =>
+      typeof byte === "number" &&
+      Number.isInteger(byte) &&
+      byte >= 0 &&
+      byte <= 255,
+    )
+  ) {
+    return value
+  }
+  let binary = ""
+  for (const byte of value.data) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+function base64OrSerializedBytesSchema(minBytes: number, maxBytes: number) {
+  return z.preprocess(
+    (value) => normalizeSerializedBytes(value, maxBytes),
+    z.string().min(Math.ceil(minBytes / 3) * 4).max(Math.ceil(maxBytes / 3) * 4),
+  )
+}
+
 export const sharedFolderRecordSchema = z.object({
   id: z.string().uuid(),
   conversationId: z.string().uuid(),
   ownerId: z.string().uuid(),
-  ciphertext: z.string().min(24).max(Math.ceil(SHARED_FOLDER_LIMITS.maxPayloadBytes / 3) * 4),
-  iv: z.string().length(16),
+  ciphertext: base64OrSerializedBytesSchema(16, SHARED_FOLDER_LIMITS.maxPayloadBytes),
+  iv: base64OrSerializedBytesSchema(12, 12),
   formatVersion: z.literal(1),
   compressed: z.boolean(),
   payloadBytes: z.number().int().min(16).max(SHARED_FOLDER_LIMITS.maxPayloadBytes),

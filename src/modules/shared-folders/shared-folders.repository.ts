@@ -20,7 +20,7 @@ export class SharedFoldersRepository {
 
   async create(conversationId: string, ownerId: string, input: NewSharedFolder) {
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const record = await this.prisma.$transaction(async (tx) => {
         const conversation = await tx.conversation.findFirst({
           where: {
             id: conversationId,
@@ -76,6 +76,7 @@ export class SharedFoldersRepository {
           },
         })
       })
+      return serializeSharedFolder(record)
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

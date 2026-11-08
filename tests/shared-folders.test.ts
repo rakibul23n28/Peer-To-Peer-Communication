@@ -11,6 +11,7 @@ import {
   buildSharedFolderTree,
   sanitizeManifestEntries,
   sharedFolderManifestSchema,
+  sharedFolderRecordSchema,
   sortSharedFolderNodes,
   type SharedFolderEntry,
 } from "../src/shared/sharedFolders.ts"
@@ -111,6 +112,68 @@ test("rejects manifests over 50,000 entries and encrypted payloads over 4 MiB", 
     SHARED_FOLDER_LIMITS.maxPayloadBytes,
     "Encrypted folder manifest",
   ))
+})
+
+test("normalizes Prisma Buffer JSON values in shared-folder records", () => {
+  const ciphertext = Buffer.alloc(16, 7)
+  const iv = Buffer.alloc(12, 3)
+  const record = sharedFolderRecordSchema.parse({
+    id: shareId,
+    conversationId,
+    ownerId: userId,
+    ciphertext: { type: "Buffer", data: [...ciphertext] },
+    iv: { type: "Buffer", data: [...iv] },
+    formatVersion: 1,
+    compressed: false,
+    payloadBytes: ciphertext.length,
+    createdAt: new Date("2026-11-09T00:00:00.000Z").toISOString(),
+    revokedAt: null,
+  })
+  assert.equal(record.ciphertext, ciphertext.toString("base64"))
+  assert.equal(record.iv, iv.toString("base64"))
+})
+
+test("serializes the create response to base64 instead of returning Prisma byte objects", async () => {
+  const ciphertext = Buffer.alloc(16, 7)
+  const iv = Buffer.alloc(12, 3)
+  const createdAt = new Date("2026-11-09T00:00:00.000Z")
+  const repository = new SharedFoldersRepository({
+    $transaction: async (operation: (tx: unknown) => unknown) => operation({
+      conversation: {
+        findFirst: async () => ({ userA: userId, userB: otherUserId }),
+      },
+      $queryRaw: async () => [],
+      block: { findFirst: async () => null },
+      sharedFolder: {
+        count: async () => 0,
+        create: async () => ({
+          id: shareId,
+          conversationId,
+          ownerId: userId,
+          ciphertext,
+          iv,
+          formatVersion: 1,
+          compressed: false,
+          payloadBytes: ciphertext.length,
+          createdAt,
+          revokedAt: null,
+        }),
+      },
+    }),
+  } as unknown as PrismaService)
+
+  const record = await repository.create(conversationId, userId, {
+    id: shareId,
+    ciphertext,
+    iv,
+    formatVersion: 1,
+    compressed: false,
+    payloadBytes: ciphertext.length,
+  })
+  assert.equal(record.ciphertext, ciphertext.toString("base64"))
+  assert.equal(record.iv, iv.toString("base64"))
+  assert.equal(typeof record.ciphertext, "string")
+  assert.equal(typeof record.iv, "string")
 })
 
 test("returns not-found for non-participants and revoked shares and forbids non-owner revoke", async () => {

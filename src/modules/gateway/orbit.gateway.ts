@@ -35,6 +35,10 @@ import { FilesService } from "../files/files.service.js"
 import { decodeBase64 } from "../messages/messages.repository.js"
 
 import { MessagesService } from "../messages/messages.service.js"
+import {
+  SharedFoldersEvents,
+  type SharedFolderEvent,
+} from "../shared-folders/shared-folders-events.js"
 
 const messageSchema = z
   .object({
@@ -175,6 +179,7 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   private readonly audioCallByUser = new Map<string, string>()
 
   private audioCallExpiryTimer: ReturnType<typeof setInterval> | null = null
+  private unsubscribeSharedFolderEvents: (() => void) | null = null
 
   constructor(
     private readonly auth: AuthService,
@@ -184,15 +189,47 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     private readonly messages: MessagesService,
 
     private readonly files: FilesService,
+
+    private readonly sharedFolderEvents: SharedFoldersEvents,
   ) {}
 
   onModuleInit(): void {
     this.audioCallExpiryTimer = setInterval(() => this.expireAudioCalls(), 5_000)
+    this.unsubscribeSharedFolderEvents = this.sharedFolderEvents.subscribe((event) => {
+      void this.broadcastSharedFolderEvent(event)
+    })
   }
 
   onModuleDestroy(): void {
     if (this.audioCallExpiryTimer) clearInterval(this.audioCallExpiryTimer)
     this.audioCallExpiryTimer = null
+    this.unsubscribeSharedFolderEvents?.()
+    this.unsubscribeSharedFolderEvents = null
+  }
+
+  private async broadcastSharedFolderEvent(event: SharedFolderEvent): Promise<void> {
+    try {
+      const members = await this.conversations.memberIds(event.conversationId, event.ownerId)
+      const payload = event.type === "shared_folder.created"
+        ? {
+            id: event.id,
+            conversationId: event.conversationId,
+            ownerId: event.ownerId,
+            createdAt: event.createdAt,
+          }
+        : { id: event.id, conversationId: event.conversationId }
+      const envelope = {
+        type: event.type,
+        id: randomUUID(),
+        ts: Date.now(),
+        payload,
+      }
+      for (const memberId of members) this.sendToUser(memberId, envelope)
+    } catch (error) {
+      this.logger.warn(
+        `Shared-folder event delivery failed (${error instanceof Error ? error.name : "unknown"})`,
+      )
+    }
   }
 
   handleConnection(client: WebSocket): void {
@@ -894,6 +931,7 @@ const constructorTarget = OrbitGateway as unknown as object
 ;(Inject(ConversationsService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 1)
 ;(Inject(MessagesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 2)
 ;(Inject(FilesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 3)
+;(Inject(SharedFoldersEvents) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 4)
 
 const registerHandler = (event: string, method: keyof OrbitGateway): void => {
   const descriptor = Object.getOwnPropertyDescriptor(gatewayPrototype, method)

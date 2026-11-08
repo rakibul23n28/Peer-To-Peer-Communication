@@ -4555,6 +4555,542 @@
     linear-gradient(155deg, #1a1e25, #20232c);
 }
 
+.orbit-shared-folder-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--orbit-panel-raised) 78%, transparent);
+}
+
+.orbit-composer {
+  position: relative;
+}
+
+.orbit-attach-menu {
+  position: absolute;
+  right: 56px;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  width: min(230px, calc(100vw - 32px));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 13px;
+  background: var(--orbit-panel);
+  box-shadow: var(--orbit-shadow);
+}
+
+.orbit-attach-menu button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--orbit-text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.orbit-attach-menu button:hover:not(:disabled),
+.orbit-attach-menu button:focus-visible {
+  outline: none;
+  background: var(--orbit-panel-raised);
+}
+
+.orbit-attach-menu button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.orbit-attach-menu svg {
+  flex: 0 0 auto;
+  color: var(--orbit-cyan);
+}
+
+.orbit-shared-folder-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.orbit-shared-folder-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.orbit-shared-folder-heading strong {
+  color: var(--orbit-text);
+  font-size: 13px;
+}
+
+.orbit-shared-folder-heading small {
+  overflow-wrap: anywhere;
+  color: var(--orbit-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.orbit-shared-folder-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--orbit-border);
+  border-radius: 11px;
+  color: var(--orbit-cyan);
+  background: var(--orbit-panel);
+}
+
+.orbit-shared-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.orbit-shared-folder-actions button,
+.orbit-folder-actions button,
+.orbit-folder-scan button,
+.orbit-folder-tree-controls > button,
+.orbit-folder-dialog > button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 10px;
+  color: var(--orbit-text);
+  background: var(--orbit-panel);
+  cursor: pointer;
+}
+
+.orbit-shared-folder-actions button:first-child,
+.orbit-folder-primary {
+  border-color: color-mix(in srgb, var(--orbit-cyan) 48%, var(--orbit-border)) !important;
+  color: var(--orbit-text);
+  background: color-mix(in srgb, var(--orbit-cyan) 18%, var(--orbit-panel)) !important;
+}
+
+.orbit-shared-folder-actions button.is-destructive {
+  color: #d77870;
+}
+
+.orbit-folder-card-error,
+.orbit-folder-card-revoked {
+  margin: 0;
+  color: var(--orbit-muted);
+  font-size: 12px;
+}
+
+.orbit-folder-card-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #d77870;
+}
+
+.orbit-folder-card-error button {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 9px;
+  color: var(--orbit-text);
+  background: var(--orbit-panel);
+}
+
+.orbit-folder-card-skeleton {
+  display: grid;
+  gap: 7px;
+}
+
+.orbit-folder-card-skeleton span {
+  height: 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--orbit-muted) 20%, transparent);
+  animation: orbit-folder-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.orbit-folder-card-skeleton span:last-child {
+  width: 64%;
+}
+
+.orbit-folder-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #070808b8;
+  backdrop-filter: blur(7px);
+}
+
+.orbit-folder-dialog,
+.orbit-folder-viewer {
+  width: min(100%, 560px);
+  max-height: min(88dvh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--orbit-border);
+  border-radius: 20px;
+  color: var(--orbit-text);
+  background: var(--orbit-panel);
+  box-shadow: var(--orbit-shadow);
+}
+
+.orbit-folder-dialog {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.orbit-folder-dialog-header,
+.orbit-folder-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.orbit-folder-dialog h2,
+.orbit-folder-viewer h2 {
+  margin: 5px 0 0;
+  color: var(--orbit-text);
+  font-size: clamp(20px, 4vw, 25px);
+  letter-spacing: -.03em;
+  overflow-wrap: anywhere;
+}
+
+.orbit-folder-close {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  color: var(--orbit-text);
+  background: var(--orbit-panel-raised);
+  cursor: pointer;
+}
+
+.orbit-folder-empty,
+.orbit-folder-scan {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  color: var(--orbit-muted);
+}
+
+.orbit-folder-empty p,
+.orbit-folder-scan p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.orbit-folder-scan {
+  justify-items: center;
+  padding: 24px 8px;
+  text-align: center;
+}
+
+.orbit-folder-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid var(--orbit-border);
+  border-top-color: var(--orbit-cyan);
+  border-radius: 50%;
+  animation: orbit-folder-spin .8s linear infinite;
+}
+
+.orbit-folder-summary {
+  display: grid;
+  gap: 5px;
+}
+
+.orbit-folder-summary strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.orbit-folder-summary span,
+.orbit-folder-preview-list,
+.orbit-folder-privacy {
+  color: var(--orbit-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.orbit-folder-toggle {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  color: var(--orbit-text);
+  font-size: 13px;
+}
+
+.orbit-folder-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--orbit-cyan);
+}
+
+.orbit-folder-preview-list {
+  display: grid;
+  max-height: 180px;
+  overflow: auto;
+  gap: 3px;
+  margin: 0;
+  padding: 8px 10px 8px 28px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  background: var(--orbit-bg);
+}
+
+.orbit-folder-preview-list li {
+  overflow-wrap: anywhere;
+}
+
+.orbit-folder-privacy {
+  margin: 0;
+  padding: 11px 12px;
+  border-left: 2px solid var(--orbit-cyan);
+  border-radius: 4px 10px 10px 4px;
+  background: color-mix(in srgb, var(--orbit-cyan) 8%, transparent);
+}
+
+.orbit-folder-error,
+.orbit-folder-invalid-note {
+  margin: 0;
+  color: #d77870;
+  font-size: 12px;
+}
+
+.orbit-folder-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.orbit-folder-viewer {
+  display: grid;
+  width: min(100%, 820px);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  padding: 20px;
+}
+
+.orbit-folder-viewer-header {
+  min-width: 0;
+  padding-bottom: 12px;
+}
+
+.orbit-folder-viewer-header > div {
+  min-width: 0;
+}
+
+.orbit-folder-viewer-header p {
+  margin: 6px 0 0;
+  color: var(--orbit-muted);
+  font-size: 12px;
+}
+
+.orbit-folder-invalid-note {
+  padding: 7px 0;
+  color: var(--orbit-muted);
+}
+
+.orbit-folder-tree-controls {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 0;
+}
+
+.orbit-folder-search {
+  display: flex;
+  min-width: 140px;
+  min-height: 40px;
+  flex: 1 1 190px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 10px;
+  color: var(--orbit-muted);
+  background: var(--orbit-bg);
+}
+
+.orbit-folder-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--orbit-text);
+  background: transparent;
+}
+
+.orbit-folder-tree-controls > button {
+  padding-inline: 9px;
+  font-size: 11px;
+}
+
+.orbit-folder-tree-scroll {
+  position: relative;
+  min-height: 180px;
+  height: min(58dvh, 500px);
+  overflow: auto;
+  outline: none;
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  background: var(--orbit-bg);
+  overscroll-behavior: contain;
+}
+
+.orbit-folder-tree-scroll:focus-visible,
+.orbit-folder-tree-row:focus-visible {
+  outline: 2px solid var(--orbit-cyan);
+  outline-offset: -2px;
+}
+
+.orbit-folder-tree-virtual {
+  position: relative;
+  min-width: 0;
+}
+
+.orbit-folder-tree-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: flex;
+  height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding-right: 11px;
+  color: var(--orbit-text);
+  cursor: default;
+}
+
+.orbit-folder-tree-row:hover,
+.orbit-folder-tree-row:focus {
+  background: color-mix(in srgb, var(--orbit-cyan) 12%, transparent);
+}
+
+.orbit-folder-tree-row > svg {
+  flex: 0 0 auto;
+  color: var(--orbit-cyan);
+}
+
+.orbit-folder-tree-disclosure {
+  display: grid;
+  width: 15px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--orbit-muted);
+}
+
+.orbit-folder-tree-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orbit-folder-tree-size,
+.orbit-folder-tree-count {
+  flex: 0 0 auto;
+  color: var(--orbit-muted);
+  font-size: 10px;
+}
+
+.orbit-folder-no-results {
+  position: absolute;
+  inset: 40% 0 auto;
+  margin: 0;
+  color: var(--orbit-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+@keyframes orbit-folder-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbit-folder-pulse {
+  to { opacity: .45; }
+}
+
+@media (max-width: 680px) {
+  .orbit-folder-backdrop {
+    padding: 0;
+  }
+
+  .orbit-folder-dialog,
+  .orbit-folder-viewer {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .orbit-folder-dialog {
+    align-content: start;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .orbit-folder-viewer {
+    padding: max(14px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .orbit-folder-tree-scroll {
+    height: auto;
+    min-height: 0;
+  }
+
+  .orbit-folder-tree-controls > button {
+    min-height: 40px;
+    flex: 1 1 auto;
+  }
+
+  .orbit-shared-folder-card {
+    padding: 9px;
+  }
+
+  .orbit-share-folder-action span,
+  .orbit-composer-bottom .orbit-attach-action span {
+    display: none;
+  }
+
+  .orbit-composer-bottom .orbit-attach-action {
+    min-width: 40px;
+    justify-content: center;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 390px) {
+  .orbit-folder-dialog {
+    padding-inline: 12px;
+  }
+
+  .orbit-folder-viewer-header h2 {
+    font-size: 19px;
+  }
+}
+
 .orbit-shell[data-appearance='midnight'] .orbit-message {
   width: min(74%, 610px);
   padding: 10px 13px 7px;

@@ -12,6 +12,7 @@ import type {
   RequestHandler,
   Response,
 } from "express"
+import { json } from "express"
 
 import { WsAdapter } from "@nestjs/platform-ws"
 
@@ -22,6 +23,7 @@ import { HttpErrorFilter } from "../modules/shared/http-error.filter.js"
 import { AppModule } from "./app.module.js"
 
 const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  bodyParser: false,
   logger:
     env.NODE_ENV === "production"
       ? ["error", "warn"]
@@ -33,7 +35,11 @@ app.useLogger(
 )
 
 app.set("trust proxy", 1)
-app.useBodyParser("json", { limit: "1mb" })
+app.use(
+  "/v1/conversations/:conversationId/shared-folders",
+  json({ limit: "6mb" }),
+)
+app.use(json({ limit: "1mb" }))
 
 const corsOrigins = (env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")

@@ -25,6 +25,7 @@ The images below are served from the repository's `public/` directory and show t
 - **End-to-end encrypted messages:** the browser derives a shared conversation key from the participants' public keys using ECDH and HKDF, then encrypts message content with AES-GCM before sending it to the API.
 - **Real-time conversations:** a WebSocket connection carries message and conversation events, with session authentication and reconnect behavior.
 - **Peer-to-peer file sharing:** files are transferred using WebRTC data channels rather than uploaded as message attachments to the API. Transfers include encrypted chunks, progress reporting, and integrity checks.
+- **Folder sharing (Step 1):** share an encrypted folder/file-name structure in a conversation. Names, relative paths, sizes, and modification times are encrypted end-to-end; file contents are never read, transferred, or uploaded. Chromium uses the read-only directory picker; Safari and Firefox use a directory-input fallback (which cannot expose empty folders). Shares are limited to 50,000 entries, depth 64, names up to 255 characters, paths up to 1,024 characters, and 4 MiB of encrypted manifest data. The receiver can search and browse the shared tree; file transfer is not part of this step.
 - **Audio calls:** start and receive one-to-one calls, with call signaling over the WebSocket connection and audio carried by WebRTC.
 - **Message controls:** edit and delete messages, reply, react, and track delivery/read receipts.
 - **Conversation and account controls:** search for people, create conversations, manage blocked users, and refresh authenticated sessions.
@@ -137,6 +138,7 @@ The Vite development server proxies API and WebSocket traffic to `API_PORT` (def
 | `npm run build` | Build the frontend into `dist/`. |
 | `npm run build:server` | Compile the API into `server-dist/`. |
 | `npm run start:server` | Start the compiled API. |
+| `npm run test:shared-folders` | Run folder-manifest, crypto, limits, and authorization tests. |
 | `npm run check:no-demo` | Check the repository for disallowed demo content. |
 | `npm run db:verify` | Run the database invariant checks in `scripts/verify-db.sql`. |
 

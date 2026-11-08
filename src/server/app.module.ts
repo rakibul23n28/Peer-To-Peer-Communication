@@ -19,6 +19,7 @@ import { PrismaModule } from "../modules/prisma/prisma.module.js"
 import { UsersModule } from "../modules/users/users.module.js"
 
 import { TurnModule } from "../modules/turn/turn.module.js"
+import { SharedFoldersModule } from "../modules/shared-folders/shared-folders.module.js"
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { TurnModule } from "../modules/turn/turn.module.js"
     MessagesModule,
 
     FilesModule,
+    SharedFoldersModule,
 
     GatewayModule,
 

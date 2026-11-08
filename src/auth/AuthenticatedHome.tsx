@@ -31,6 +31,11 @@ import {
   type OrbitConnectionState,
 } from './orbitSocket';
 import { decryptMessage, derivePeerKey, encryptMessage } from './messageCrypto';
+import { encryptFolderManifest, decryptFolderManifest } from './shared-folders/crypto';
+import { createSharedFolder, listSharedFolders, revokeSharedFolder } from './shared-folders/api';
+import {
+  type SharedFolderManifest,
+} from '../shared/sharedFolders';
 import { getDeviceIdentity, getDeviceIdentityForVersion, getSavedDeviceIdentities, type DeviceIdentity } from './keyStore';
 import { getLocalMessage, removeLocalMessage, saveLocalMessage } from './messageCache';
 import { hashFile, PeerFileTransfer, supportsFileSize, type PeerFileSignal } from './peerFileTransfer';
@@ -510,8 +515,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     setActionError('');
     try {
       const response = await getConversations();
+      conversationsRef.current = response.conversations;
       setConversations(response.conversations);
       const refreshed = response.conversations.find(({ id }) => id === selected.id);
+      await refreshThread(true);
       if (refreshed?.peer.keyAvailable) {
         setNotice(`${refreshed.peer.displayName}'s encryption key is available.`);
       } else {
@@ -845,7 +852,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     };
   })), [decryptWithAvailableKeyVersions, user.id, user.keyVersion]);
 
-  const refreshThread = useCallback(async () => {
+  const refreshThread = useCallback(async (includeSharedFolders = false) => {
     const conversation = conversationsRef.current.find(({ id }) => id === selectedId);
     if (!conversation || !deviceIdentity) return;
     const loadId = ++threadLoadIdRef.current;
@@ -902,6 +909,72 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       const decryptedResults = await decryptMessagePage(response.messages, conversation, deviceIdentity);
       if (loadId !== threadLoadIdRef.current || historyConversationRef.current !== conversation.id) return;
       const decrypted = decryptedResults.map(({ message }) => message);
+      const sharedFolderRecords = includeSharedFolders
+        ? await listSharedFolders(conversation.id)
+        : [];
+      const folderMessages = await Promise.all(sharedFolderRecords.map(async (record) => {
+        const baseMessage: ThreadMessage = {
+          id: `shared-folder:${record.id}`,
+          conversationId: record.conversationId,
+          senderId: record.ownerId,
+          clientMsgId: `shared-folder:${record.id}`,
+          seq: "0",
+          ciphertext: null,
+          iv: null,
+          keyVersion: 1,
+          senderKeyVersion: 1,
+          recipientKeyVersion: 1,
+          replyToId: null,
+          kind: 'shared_folder',
+          createdAt: record.createdAt,
+          editedAt: null,
+          deletedAt: null,
+          receipts: [],
+          reactions: [],
+          plaintext: record.ownerId === user.id ? 'You shared a folder' : `${conversation.peer.displayName} shared a folder`,
+          decryptedReactions: [],
+        };
+        if (!conversation.peer.keyAvailable) {
+          return {
+            ...baseMessage,
+            sharedFolder: { ...record, status: 'pending' as const },
+          };
+        }
+        try {
+          const key = await derivePeerKey(
+            deviceIdentity,
+            conversation.id,
+            conversation.peer.publicKey,
+            'orbit-shared-folder-v1',
+          );
+          const decryptedFolder = await decryptFolderManifest(
+            record,
+            key,
+            conversation.id,
+            record.id,
+          );
+          const manifest: SharedFolderManifest = decryptedFolder.manifest;
+          const fileEntries = manifest.entries.filter(({ k }) => k === 'f');
+          return {
+            ...baseMessage,
+            sharedFolder: {
+              ...record,
+              status: 'ready' as const,
+              manifest,
+              invalidCount: decryptedFolder.invalidCount,
+              fileCount: fileEntries.length,
+              folderCount: manifest.entries.filter(({ k }) => k === 'd').length,
+              totalSize: fileEntries.reduce((total, entry) => total + (entry.s ?? 0), 0),
+            },
+          };
+        } catch {
+          return {
+            ...baseMessage,
+            sharedFolder: { ...record, status: 'error' as const },
+          };
+        }
+      }));
+      if (loadId !== threadLoadIdRef.current || historyConversationRef.current !== conversation.id) return;
       await Promise.all(decryptedResults
         .filter(({ message, textDecrypted }) =>
           textDecrypted && message.senderId === user.id && confirmedOutboxIds.includes(message.clientMsgId),
@@ -926,6 +999,19 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           }
         }
         for (const item of decrypted) merged.set(item.id, item);
+        for (const item of folderMessages) merged.set(item.id, item);
+        for (const item of current) {
+          if (
+            item.conversationId === conversation.id &&
+            item.sharedFolder?.status === 'revoked' &&
+            !folderMessages.some((folder) => folder.sharedFolder?.id === item.sharedFolder?.id)
+          ) merged.set(item.id, item);
+          if (
+            !includeSharedFolders &&
+            item.conversationId === conversation.id &&
+            item.kind === 'shared_folder'
+          ) merged.set(item.id, item);
+        }
         const mergedClientIds = new Set(
           [...merged.values()].map((item) => item.clientMsgId),
         );
@@ -942,6 +1028,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           if (left.sendState && right.sendState) return left.createdAt.localeCompare(right.createdAt);
           if (left.sendState) return 1;
           if (right.sendState) return -1;
+          if (left.kind === 'shared_folder' || right.kind === 'shared_folder') {
+            return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+          }
           return BigInt(left.seq) < BigInt(right.seq) ? -1 : BigInt(left.seq) > BigInt(right.seq) ? 1 : 0;
         });
       });
@@ -1014,7 +1103,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     shouldAutoScrollRef.current = true;
     lastAutoScrollTokenRef.current = '';
     if (!selectedId) return;
-    void refreshThread();
+    void refreshThread(true);
     const interval = window.setInterval(() => void refreshThread(), 4000);
     return () => window.clearInterval(interval);
   }, [refreshThread, selectedId]);
@@ -1089,6 +1178,20 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (envelope.event === 'file.offered' || envelope.event === 'file.status') {
         void refreshThread();
       }
+      if (envelope.event === 'shared_folder.created' || envelope.event === 'shared_folder.revoked') {
+        const event = envelope.data as {
+          payload?: { id?: string; conversationId?: string };
+        };
+        const payload = event.payload;
+        if (envelope.event === 'shared_folder.revoked' && payload?.id) {
+          setThreadMessages((current) => current.map((item) =>
+            item.sharedFolder && item.sharedFolder.id === payload.id
+              ? { ...item, sharedFolder: { ...item.sharedFolder, status: 'revoked' } }
+              : item,
+          ));
+        }
+        if (payload?.conversationId === selectedId) void refreshThread(true);
+      }
       if (envelope.event === 'file.peer.signal') {
         const event = envelope.data as {
           payload?: { conversationId?: string; signal?: PeerFileSignal };
@@ -1139,7 +1242,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     if (connection !== 'connected' || !selected) return;
-    void refreshThread();
+    void refreshThread(true);
     if (!selected.peer.keyAvailable) return;
     const storageKey = `orbit-outbox:${user.id}`;
     try {
@@ -1480,6 +1583,44 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
   }
 
+  async function shareFolder(manifest: SharedFolderManifest, shareId: string): Promise<void> {
+    const conversation = selected;
+    if (!conversation || !deviceIdentity || peerBlocked || !conversation.peer.keyAvailable) {
+      throw new Error('The conversation encryption key is not ready. Refresh the contact key and retry.')
+    }
+    const key = await derivePeerKey(
+      deviceIdentity,
+      conversation.id,
+      conversation.peer.publicKey,
+      'orbit-shared-folder-v1',
+    )
+    const encrypted = await encryptFolderManifest(manifest, key, conversation.id, shareId)
+    await createSharedFolder(conversation.id, {
+      id: shareId,
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      formatVersion: 1,
+      compressed: encrypted.compressed,
+    })
+    setNotice('Folder structure shared end-to-end encrypted. No file contents were uploaded.')
+    await refreshThread(true)
+  }
+
+  async function stopSharingFolder(id: string): Promise<void> {
+    try {
+      await revokeSharedFolder(id)
+      setThreadMessages((current) => current.map((item) =>
+        item.sharedFolder && item.sharedFolder.id === id
+          ? { ...item, sharedFolder: { ...item.sharedFolder, status: 'revoked' } }
+          : item,
+      ))
+      setNotice('Folder sharing stopped.')
+      await refreshThread(true)
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not stop sharing this folder.')
+    }
+  }
+
   async function acceptFile(item: ThreadMessage) {
     if (!selected || !deviceIdentity || !item.file || item.file.status !== 'offered') return;
     const size = Number(item.file.size);
@@ -1746,7 +1887,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         onToggleAudioMute={toggleAudioMute}
         onBlock={() => void blockSelectedUser()}
         onUnblock={() => void unblockContact(selected.peer.id)}
-        onRetryThread={() => void refreshThread()}
+        onRetryThread={() => void refreshThread(true)}
         onMessageListScroll={(nearBottom) => { shouldAutoScrollRef.current = nearBottom; }}
         onLoadOlderMessages={() => void loadOlderMessages()}
         onAcceptFile={(item) => void acceptFile(item)}
@@ -1761,6 +1902,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         onReply={setReplyTo}
         onReact={(item, reaction) => void reactToMessage(item, reaction)}
         onOfferFile={(file) => void offerFile(file)}
+        onShareFolder={shareFolder}
+        onRevokeFolder={(id) => void stopSharingFolder(id)}
         onReplyChange={setReplyTo}
         onDraftChange={setDraft}
         onRetryAllQueued={retryAllQueuedMessages}

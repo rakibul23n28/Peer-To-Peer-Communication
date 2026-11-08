@@ -56,6 +56,7 @@ model User {
   receipts       MessageReceipt[]
   reactions      Reaction[]
   files          FileTransfer[]   @relation("file_sender")
+  sharedFolders  SharedFolder[]
   blocksSent     Block[]          @relation("blocker")
   blocksReceived Block[]          @relation("blocked")
 
@@ -105,6 +106,7 @@ model Conversation {
   memberB   User           @relation("conversation_b", fields: [userB], references: [id], onDelete: Cascade)
   messages  Message[]
   files     FileTransfer[]
+  sharedFolders SharedFolder[]
 
   @@unique([userA, userB])
   @@index([userB])
@@ -195,6 +197,24 @@ model FileTransfer {
   @@index([senderId])
   @@index([updatedAt])
   @@map("file_transfers")
+}
+
+model SharedFolder {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
+  ownerId        String       @map("owner_id") @db.Uuid
+  ciphertext     Bytes
+  iv             Bytes
+  formatVersion  Int          @map("format_version")
+  compressed     Boolean      @default(false)
+  payloadBytes   Int          @map("payload_bytes")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  owner          User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("shared_folders")
 }
 
 model Block {

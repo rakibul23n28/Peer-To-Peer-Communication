@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.server.json",
     "dev:server": "tsx watch --tsconfig tsconfig.server.json src/server/main.ts",
     "build:server": "tsc --project tsconfig.server.json",
+    "test:shared-folders": "tsx --test tests/shared-folders.test.ts",
     "prisma:generate": "node scripts/generate-prisma.mjs",
     "start:server": "node server-dist/server/main.js",
     "db:migrate:dev": "prisma migrate dev",

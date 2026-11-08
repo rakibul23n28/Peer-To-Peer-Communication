@@ -1,17 +1,32 @@
+import { useRef, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import type { ConversationSummary, EncryptedMessage, UserIdentity } from '../session';
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitIcon } from './OrbitIcon';
 import { initials } from './OrbitMark';
 import { AudioCallPanel, type AudioCallView } from './AudioCallPanel';
+import type { SharedFolderRecord, SharedFolderManifest } from '../../shared/sharedFolders';
+import { SharedFolderComposer } from '../shared-folders/SharedFolderComposer';
+import { SharedFolderViewer } from '../shared-folders/SharedFolderViewer';
 
-export type ThreadMessage = EncryptedMessage & {
+export type SharedFolderTimelineItem = SharedFolderRecord & {
+  status: 'pending' | 'ready' | 'error' | 'revoked';
+  manifest?: SharedFolderManifest;
+  invalidCount?: number;
+  fileCount?: number;
+  folderCount?: number;
+  totalSize?: number;
+};
+
+export type ThreadMessage = Omit<EncryptedMessage, 'kind'> & {
+  kind: EncryptedMessage['kind'] | 'shared_folder';
   plaintext: string;
   decryptionError?: string;
   decryptedReactions: Array<{ userId: string; value: string }>;
   decryptedFileName?: string;
   sendState?: 'queued' | 'sending' | 'sent' | 'failed';
   sendError?: string;
+  sharedFolder?: SharedFolderTimelineItem;
 };
 
 export type FileTransferProgress = { transferred: number; total: number; error?: string; verified?: boolean };
@@ -71,6 +86,8 @@ interface ConversationThreadProps {
   onReply: (id: string) => void;
   onReact: (item: ThreadMessage, reaction: string) => void;
   onOfferFile: (file: File) => void;
+  onShareFolder: (manifest: SharedFolderManifest, shareId: string) => Promise<void>;
+  onRevokeFolder: (id: string) => void;
   onReplyChange: (id: string | null) => void;
   onDraftChange: (value: string) => void;
   onRetryAllQueued: () => void;
@@ -153,12 +170,19 @@ export function ConversationThread({
   onReply,
   onReact,
   onOfferFile,
+  onShareFolder,
+  onRevokeFolder,
   onReplyChange,
   onDraftChange,
   onRetryAllQueued,
   onSendMessage,
 }: ConversationThreadProps) {
   let previousDay = '';
+  const [folderComposerOpen, setFolderComposerOpen] = useState(false);
+  const [viewerShareId, setViewerShareId] = useState<string | null>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const attachButtonRef = useRef<HTMLButtonElement | null>(null);
+  const viewerItem = threadMessages.find((item) => item.sharedFolder?.id === viewerShareId);
 
   return <div className="orbit-thread">
     <header className="orbit-thread-header">
@@ -245,9 +269,29 @@ export function ConversationThread({
         }, []);
         return <div className="orbit-message-row" key={item.id} id={`orbit-message-${item.id}`} tabIndex={-1}>
           {showDay && <div className="orbit-day-divider"><span>{dayLabel(item.createdAt)}</span></div>}
-          <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}${item.sendState ? ` is-${item.sendState}` : ''}${item.kind === 'file' ? ' is-file-message' : ''}`}>
+          <article className={`orbit-message${item.senderId === user.id ? ' is-own' : ''}${item.sendState ? ` is-${item.sendState}` : ''}${item.kind === 'file' ? ' is-file-message' : ''}${item.kind === 'shared_folder' ? ' is-folder-message' : ''}`}>
             {item.replyToId && <span className="orbit-reply-caption">REPLY TO / {item.replyToId.slice(0, 8)}</span>}
-            {item.kind === 'file' && item.file ? <div className="orbit-file-card">
+            {item.kind === 'shared_folder' && item.sharedFolder ? <div className="orbit-shared-folder-card">
+              <div className="orbit-shared-folder-heading">
+                <span className="orbit-shared-folder-icon"><OrbitIcon name="tree" /></span>
+                <div>
+                  <strong>{item.senderId === user.id ? 'You shared a folder' : `${conversation.peer.displayName} shared a folder`}</strong>
+                  {item.sharedFolder.status === 'ready' && item.sharedFolder.manifest
+                    ? <small>{item.sharedFolder.manifest.rootName} · {item.sharedFolder.fileCount?.toLocaleString()} files · {item.sharedFolder.folderCount?.toLocaleString()} folders · {formatFileSize(item.sharedFolder.totalSize ?? 0)}</small>
+                    : <small>{item.sharedFolder.status === 'pending' ? 'Opening encrypted folder…' : item.sharedFolder.status === 'revoked' ? 'This folder is no longer shared' : "Couldn't open this shared folder"}</small>}
+                </div>
+              </div>
+              {item.sharedFolder.status === 'pending' && <div className="orbit-folder-card-skeleton" aria-hidden="true"><span /><span /></div>}
+              {item.sharedFolder.status === 'error' && <div className="orbit-folder-card-error" role="alert">
+                <span>Couldn't open this shared folder</span>
+                <button type="button" onClick={onRetryThread}>Retry</button>
+              </div>}
+              {item.sharedFolder.status === 'revoked' && <p className="orbit-folder-card-revoked" role="status">This folder is no longer shared.</p>}
+              {item.sharedFolder.status === 'ready' && <div className="orbit-shared-folder-actions">
+                <button type="button" onClick={() => setViewerShareId(item.sharedFolder!.id)}>Open</button>
+                {item.senderId === user.id && <button type="button" className="is-destructive" onClick={() => onRevokeFolder(item.sharedFolder!.id)}>Stop sharing</button>}
+              </div>}
+            </div> : item.kind === 'file' && item.file ? <div className="orbit-file-card">
               <div className="orbit-file-card-heading">
                 <span aria-hidden="true"><OrbitIcon name="file" /></span>
                 <div><strong>{item.decryptedFileName ?? 'Encrypted file'}</strong><small>{formatFileSize(Number(item.file.size))} · {item.file.mime}</small></div>
@@ -350,7 +394,7 @@ export function ConversationThread({
                 <span>{reaction.count}</span>
               </button>)}
               </div>}
-              {!item.deletedAt && <div className="orbit-message-actions" aria-label="Message actions">
+              {!item.deletedAt && item.kind !== 'shared_folder' && <div className="orbit-message-actions" aria-label="Message actions">
                 {item.senderId === user.id && !item.sendState && <>
                   <button type="button" title="Edit message" aria-label="Edit message" disabled={!conversation.peer.keyAvailable} onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
                   <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
@@ -389,13 +433,59 @@ export function ConversationThread({
       <div className="orbit-composer-bottom">
         <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'End-to-end encrypted · Enter to send'}</span>
         {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected' || !conversation.peer.keyAvailable} onClick={onRetryAllQueued}>Retry queued</button>}
-        <button className="orbit-attach-action" type="button" title="Attach a file or media" disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || fileSending || peerBlocked} onClick={() => filePickerRef.current?.click()} aria-label="Attach a file or media">
-          <OrbitIcon name="paperclip" /><span>{fileSending ? 'Preparing…' : 'Attach file'}</span>
+        <button
+          className="orbit-attach-action"
+          ref={attachButtonRef}
+          type="button"
+          title="Open attachment options"
+          disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked}
+          onClick={() => setAttachMenuOpen((open) => !open)}
+          aria-label="Open attachment options"
+          aria-haspopup="menu"
+          aria-expanded={attachMenuOpen}
+        >
+          <OrbitIcon name="paperclip" /><span>Attach</span>
         </button>
+        {attachMenuOpen && <div className="orbit-attach-menu" role="menu" aria-label="Attachment options" onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setAttachMenuOpen(false);
+            attachButtonRef.current?.focus();
+          }
+        }}>
+          <button type="button" role="menuitem" disabled={fileSending} onClick={() => {
+            setAttachMenuOpen(false);
+            filePickerRef.current?.click();
+          }}>
+            <OrbitIcon name="file" /><span>{fileSending ? 'Preparing…' : 'Attach file'}</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => {
+            setAttachMenuOpen(false);
+            setFolderComposerOpen(true);
+          }}>
+            <OrbitIcon name="tree" /><span>Share folder</span>
+          </button>
+        </div>}
         <button className="orbit-primary-action" type="submit" disabled={!draft.trim() || sending || !deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked}>
           <span className="orbit-button-text">{sending ? 'Sending…' : 'Send'}</span><OrbitIcon name="send" size={16}  />
         </button>
       </div>
     </form>
+    {folderComposerOpen && <SharedFolderComposer
+      peerName={conversation.peer.displayName}
+      disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked}
+      onShare={onShareFolder}
+      onClose={() => setFolderComposerOpen(false)}
+    />}
+    {viewerItem?.sharedFolder?.status === 'ready' && viewerItem.sharedFolder.manifest && <SharedFolderViewer
+      manifest={viewerItem.sharedFolder.manifest}
+      invalidCount={viewerItem.sharedFolder.invalidCount ?? 0}
+      onClose={() => setViewerShareId(null)}
+    />}
+    {viewerItem?.sharedFolder?.status === 'revoked' && <div className="orbit-folder-backdrop" role="presentation">
+      <section className="orbit-folder-dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-folder-revoked-title">
+        <h2 id="orbit-folder-revoked-title">This folder is no longer shared</h2>
+        <button type="button" onClick={() => setViewerShareId(null)}>Close</button>
+      </section>
+    </div>}
   </div>;
 }

@@ -55,6 +55,15 @@ export class HttpErrorFilter implements ExceptionFilter {
         if (retryAfterSeconds)
           response.setHeader("Retry-After", String(retryAfterSeconds))
       }
+    } else if (
+      typeof exception === "object" &&
+      exception !== null &&
+      "type" in exception &&
+      exception.type === "entity.too.large"
+    ) {
+      status = HttpStatus.PAYLOAD_TOO_LARGE
+      code = "PAYLOAD_TOO_LARGE"
+      message = "The encrypted folder payload exceeds the 4 MiB limit."
     } else if (exception instanceof ZodError) {
       status = HttpStatus.BAD_REQUEST
 

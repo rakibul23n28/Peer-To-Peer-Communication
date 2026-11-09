@@ -94,27 +94,42 @@ export interface SharedFolderRecord {
   revokedAt: string | null
 }
 
-function normalizeSerializedBytes(value: unknown, maxBytes: number): unknown {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("type" in value) ||
-    value.type !== "Buffer" ||
-    !("data" in value) ||
-    !Array.isArray(value.data) ||
-    value.data.length > maxBytes ||
-    !value.data.every((byte) =>
-      typeof byte === "number" &&
-      Number.isInteger(byte) &&
-      byte >= 0 &&
-      byte <= 255,
-    )
-  ) {
-    return value
-  }
+function byteArrayToBase64(data: unknown, maxBytes: number): string | null {
+  if (!Array.isArray(data) && !(data instanceof Uint8Array)) return null
+  if (data.length > maxBytes) return null
   let binary = ""
-  for (const byte of value.data) binary += String.fromCharCode(byte)
+  for (const byte of data) {
+    if (
+      typeof byte !== "number" ||
+      !Number.isInteger(byte) ||
+      byte < 0 ||
+      byte > 255
+    ) return null
+    binary += String.fromCharCode(byte)
+  }
   return btoa(binary)
+}
+
+function normalizeSerializedBytes(value: unknown, maxBytes: number): unknown {
+  if (value instanceof Uint8Array) {
+    return byteArrayToBase64(value, maxBytes) ?? value
+  }
+  if (Array.isArray(value)) {
+    return byteArrayToBase64(value, maxBytes) ?? value
+  }
+  if (typeof value !== "object" || value === null) return value
+  if ("type" in value && value.type === "Buffer" && "data" in value) {
+    return byteArrayToBase64(value.data, maxBytes) ?? value
+  }
+
+  const keys = Object.keys(value)
+  if (keys.length === 0 || keys.length > maxBytes) return value
+  const data: unknown[] = []
+  for (let index = 0; index < keys.length; index += 1) {
+    if (keys[index] !== String(index)) return value
+    data.push((value as Record<string, unknown>)[keys[index]])
+  }
+  return byteArrayToBase64(data, maxBytes) ?? value
 }
 
 function base64OrSerializedBytesSchema(minBytes: number, maxBytes: number) {

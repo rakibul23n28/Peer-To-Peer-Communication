@@ -10,6 +10,6 @@ import { SharedFoldersService } from "./shared-folders.service.js"
   imports: [AuthModule],
   controllers: [SharedFoldersController],
   providers: [SharedFoldersRepository, SharedFoldersService, SharedFoldersEvents],
-  exports: [SharedFoldersEvents],
+  exports: [SharedFoldersEvents, SharedFoldersService],
 })
 export class SharedFoldersModule {}

@@ -39,6 +39,12 @@ import {
   SharedFoldersEvents,
   type SharedFolderEvent,
 } from "../shared-folders/shared-folders-events.js"
+import { SharedFoldersService } from "../shared-folders/shared-folders.service.js"
+import {
+  previewRtcPayloadSchema,
+  previewSignalDirectionValid,
+  previewSignalSchema,
+} from "../../shared/previewProtocol.js"
 
 const messageSchema = z
   .object({
@@ -177,6 +183,14 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   private readonly audioCalls = new Map<string, AudioCallRecord>()
 
   private readonly audioCallByUser = new Map<string, string>()
+  private readonly previewSessions = new Map<string, {
+    shareId: string
+    sessionId: string
+    ownerId: string
+    viewerId: string
+    expiresAt: number
+  }>()
+  private readonly previewSignalWindows = new Map<string, number[]>()
 
   private audioCallExpiryTimer: ReturnType<typeof setInterval> | null = null
   private unsubscribeSharedFolderEvents: (() => void) | null = null
@@ -191,6 +205,8 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     private readonly files: FilesService,
 
     private readonly sharedFolderEvents: SharedFoldersEvents,
+
+    private readonly sharedFolders: SharedFoldersService,
   ) {}
 
   onModuleInit(): void {
@@ -225,6 +241,26 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         payload,
       }
       for (const memberId of members) this.sendToUser(memberId, envelope)
+      if (event.type === "shared_folder.revoked") {
+        for (const [key, session] of this.previewSessions) {
+          if (session.shareId !== event.id) continue
+          const bye = {
+            type: "preview.signal",
+            id: randomUUID(),
+            ts: Date.now(),
+            payload: {
+              shareId: session.shareId,
+              sessionId: session.sessionId,
+              kind: "bye",
+              payload: { kind: "bye" },
+              senderId: event.ownerId,
+            },
+          }
+          this.sendToUser(session.viewerId, bye)
+          this.sendToUser(session.ownerId, bye)
+          this.previewSessions.delete(key)
+        }
+      }
     } catch (error) {
       this.logger.warn(
         `Shared-folder event delivery failed (${error instanceof Error ? error.name : "unknown"})`,
@@ -243,6 +279,27 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     const timer = this.authTimers.get(client)
 
     if (timer) clearTimeout(timer)
+
+    const disconnectedUserId = this.users.get(client)
+    if (disconnectedUserId) {
+      for (const [key, session] of this.previewSessions) {
+        if (session.viewerId !== disconnectedUserId && session.ownerId !== disconnectedUserId) continue
+        const peerId = session.viewerId === disconnectedUserId ? session.ownerId : session.viewerId
+        this.sendToUser(peerId, {
+          type: "preview.signal",
+          id: randomUUID(),
+          ts: Date.now(),
+          payload: {
+            shareId: session.shareId,
+            sessionId: session.sessionId,
+            kind: "bye",
+            payload: { kind: "bye" },
+            senderId: disconnectedUserId,
+          },
+        })
+        this.previewSessions.delete(key)
+      }
+    }
 
     for (const call of this.audioCalls.values()) {
       if (call.callerSocket !== client && call.calleeSocket !== client) continue
@@ -602,6 +659,84 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     return { type: "file.peer.signal.ack", id: input.signal.fileId, payload: { delivered: true } }
   }
 
+  async relayPreviewSignal(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = previewSignalSchema.parse(body)
+    const rtcPayload = previewRtcPayloadSchema.parse({
+      ...(typeof input.payload === "object" && input.payload !== null
+        ? input.payload
+        : {}),
+      kind: input.kind,
+    })
+    const context = await this.sharedFolders.previewContext(input.shareId, userId)
+    const isOwner = context.ownerId === userId
+    if (!previewSignalDirectionValid(isOwner, input.kind)) {
+      throw new HttpException("Only the folder owner can answer a preview.", 403)
+    }
+    const recipientId = context.participantIds.find((participantId) => participantId !== userId)
+    if (!recipientId) throw new HttpException("Preview participant not found.", 404)
+
+    const now = Date.now()
+    const rateKey = `${userId}:${input.shareId}`
+    const recent = (this.previewSignalWindows.get(rateKey) ?? [])
+      .filter((timestamp) => now - timestamp < 60_000)
+    if (recent.length >= 60) throw new HttpException("Preview signaling is rate limited.", 429)
+    recent.push(now)
+    this.previewSignalWindows.set(rateKey, recent)
+
+    const sessionKey = `${input.shareId}:${input.sessionId}`
+    for (const [key, session] of this.previewSessions) {
+      if (session.expiresAt <= now) this.previewSessions.delete(key)
+    }
+    const existing = this.previewSessions.get(sessionKey)
+    if (input.kind === "offer") {
+      if (existing) throw new HttpException("This preview session already exists.", 409)
+      const activeCount = [...this.previewSessions.values()]
+        .filter((session) => session.shareId === input.shareId).length
+      if (activeCount >= 4) throw new HttpException("Too many active previews for this folder.", 429)
+      this.previewSessions.set(sessionKey, {
+        shareId: input.shareId,
+        sessionId: input.sessionId,
+        ownerId: context.ownerId,
+        viewerId: userId,
+        expiresAt: now + 60 * 60_000,
+      })
+    } else if (
+      !existing ||
+      existing.ownerId !== context.ownerId ||
+      (userId !== existing.viewerId && userId !== existing.ownerId)
+    ) {
+      throw new HttpException("Preview session not found.", 404)
+    }
+
+    if (!this.hasConnectedUser(recipientId)) {
+      this.sendToUser(userId, {
+        type: "preview.unavailable",
+        id: randomUUID(),
+        ts: now,
+        payload: { shareId: input.shareId, sessionId: input.sessionId, reason: "peer_offline" },
+      })
+      if (input.kind === "offer" || input.kind === "bye") this.previewSessions.delete(sessionKey)
+      return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: false } }
+    }
+
+    this.sendToUser(recipientId, {
+      type: "preview.signal",
+      id: randomUUID(),
+      ts: now,
+      payload: {
+        shareId: input.shareId,
+        sessionId: input.sessionId,
+        kind: input.kind,
+        payload: rtcPayload,
+        senderId: userId,
+      },
+    })
+    if (input.kind === "bye") this.previewSessions.delete(sessionKey)
+    else if (existing) existing.expiresAt = now + 60 * 60_000
+    return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: true } }
+  }
+
   async inviteAudioCall(client: WebSocket, body: unknown) {
     const userId = await this.authenticatedUser(client)
     const input = audioCallInviteSchema.parse(body)
@@ -932,6 +1067,7 @@ const constructorTarget = OrbitGateway as unknown as object
 ;(Inject(MessagesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 2)
 ;(Inject(FilesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 3)
 ;(Inject(SharedFoldersEvents) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 4)
+;(Inject(SharedFoldersService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 5)
 
 const registerHandler = (event: string, method: keyof OrbitGateway): void => {
   const descriptor = Object.getOwnPropertyDescriptor(gatewayPrototype, method)
@@ -951,6 +1087,7 @@ registerHandler("file.status", "updateFile")
 registerHandler("file.peer.request", "requestPeerFileShare")
 registerHandler("file.peer.response", "respondToPeerFileShare")
 registerHandler("file.peer.signal", "relayFileSignal")
+registerHandler("preview.signal", "relayPreviewSignal")
 registerHandler("call.invite", "inviteAudioCall")
 registerHandler("call.respond", "respondToAudioCall")
 registerHandler("call.cancel", "cancelAudioCall")

@@ -112,6 +112,43 @@ export class SharedFoldersRepository {
     return serializeSharedFolder(record)
   }
 
+  async previewContext(id: string, userId: string) {
+    const record = await this.prisma.sharedFolder.findFirst({
+      where: { id, revokedAt: null },
+      select: {
+        id: true,
+        conversationId: true,
+        ownerId: true,
+        conversation: { select: { userA: true, userB: true } },
+      },
+    })
+    if (!record) throw notFound("Shared folder not found")
+    if (userId !== record.conversation.userA && userId !== record.conversation.userB) {
+      throw notFound("Shared folder not found")
+    }
+    const blocked = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: record.conversation.userA, blockedId: record.conversation.userB },
+          { blockerId: record.conversation.userB, blockedId: record.conversation.userA },
+        ],
+      },
+      select: { blockerId: true },
+    })
+    if (blocked) {
+      throw new ForbiddenException({
+        code: "CONVERSATION_BLOCKED",
+        message: "Preview is unavailable for this conversation.",
+      })
+    }
+    return {
+      id: record.id,
+      conversationId: record.conversationId,
+      ownerId: record.ownerId,
+      participantIds: [record.conversation.userA, record.conversation.userB] as const,
+    }
+  }
+
   async revoke(id: string, userId: string) {
     const record = await this.prisma.sharedFolder.findFirst({
       where: {

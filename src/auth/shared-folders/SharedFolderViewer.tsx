@@ -26,6 +26,8 @@ interface SharedFolderViewerProps {
   manifest: SharedFolderManifest
   invalidCount: number
   onClose: () => void
+  onPreviewFile?: (entryId: number) => void
+  previewDisabled?: boolean
 }
 
 function formatSize(size: number): string {
@@ -97,7 +99,13 @@ function flattenTree(
   return rows
 }
 
-export function SharedFolderViewer({ manifest, invalidCount, onClose }: SharedFolderViewerProps) {
+export function SharedFolderViewer({
+  manifest,
+  invalidCount,
+  onClose,
+  onPreviewFile,
+  previewDisabled = false,
+}: SharedFolderViewerProps) {
   const root = useMemo(() => buildSharedFolderTree(manifest.entries), [manifest])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
   const [filter, setFilter] = useState("")
@@ -183,6 +191,9 @@ export function SharedFolderViewer({ manifest, invalidCount, onClose }: SharedFo
         const parentIndex = rows.findIndex(({ node }) => node.path === row.parentPath)
         if (parentIndex >= 0) moveFocus(parentIndex)
       }
+    } else if ((event.key === "Enter" || event.key === " ") && row.node.kind === "f" && !previewDisabled && row.node.entryId !== undefined) {
+      event.preventDefault()
+      onPreviewFile?.(row.node.entryId)
     } else if ((event.key === "Enter" || event.key === " ") && row.hasChildren) {
       event.preventDefault()
       setExpanded((current) => {
@@ -253,6 +264,12 @@ export function SharedFolderViewer({ manifest, invalidCount, onClose }: SharedFo
                     else next.add(row.node.path)
                     return next
                   })
+                } else if (
+                  row.node.kind === "f" &&
+                  !previewDisabled &&
+                  row.node.entryId !== undefined
+                ) {
+                  onPreviewFile?.(row.node.entryId)
                 }
               }}
             >

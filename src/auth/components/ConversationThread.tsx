@@ -1,13 +1,18 @@
 import { useRef, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import type { ConversationSummary, EncryptedMessage, UserIdentity } from '../session';
+import type { DeviceIdentity } from '../keyStore';
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitIcon } from './OrbitIcon';
 import { initials } from './OrbitMark';
 import { AudioCallPanel, type AudioCallView } from './AudioCallPanel';
-import type { SharedFolderRecord, SharedFolderManifest } from '../../shared/sharedFolders';
+import type { SharedFolderEntry, SharedFolderRecord, SharedFolderManifest } from '../../shared/sharedFolders';
+import type { PreviewSignal } from '../../shared/previewProtocol';
 import { SharedFolderComposer } from '../shared-folders/SharedFolderComposer';
 import { SharedFolderViewer } from '../shared-folders/SharedFolderViewer';
+import type { PickedFolder } from '../shared-folders/picker';
+import { PreviewPane } from '../shared-folders/PreviewPane';
+import { PreviewSessionManager } from '../shared-folders/previewSession';
 
 export type SharedFolderTimelineItem = SharedFolderRecord & {
   status: 'pending' | 'ready' | 'error' | 'revoked';
@@ -59,6 +64,8 @@ interface ConversationThreadProps {
   remoteAudioStream: MediaStream | null;
   audioCallDisabled: boolean;
   audioCallLabel: string;
+  deviceIdentity: DeviceIdentity | null;
+  previewSessionManager: PreviewSessionManager;
   onBack: () => void;
   onToggleNavigation: () => void;
   onToggleDetails: () => void;
@@ -86,7 +93,8 @@ interface ConversationThreadProps {
   onReply: (id: string) => void;
   onReact: (item: ThreadMessage, reaction: string) => void;
   onOfferFile: (file: File) => void;
-  onShareFolder: (manifest: SharedFolderManifest, shareId: string) => Promise<void>;
+  onShareFolder: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder) => Promise<void>;
+  onPreviewSignal: (signal: PreviewSignal) => void;
   onRevokeFolder: (id: string) => void;
   onReplyChange: (id: string | null) => void;
   onDraftChange: (value: string) => void;
@@ -143,6 +151,8 @@ export function ConversationThread({
   remoteAudioStream,
   audioCallDisabled,
   audioCallLabel,
+  deviceIdentity,
+  previewSessionManager,
   onBack,
   onToggleNavigation,
   onToggleDetails,
@@ -171,6 +181,7 @@ export function ConversationThread({
   onReact,
   onOfferFile,
   onShareFolder,
+  onPreviewSignal,
   onRevokeFolder,
   onReplyChange,
   onDraftChange,
@@ -180,9 +191,22 @@ export function ConversationThread({
   let previousDay = '';
   const [folderComposerOpen, setFolderComposerOpen] = useState(false);
   const [viewerShareId, setViewerShareId] = useState<string | null>(null);
+  const [previewEntryId, setPreviewEntryId] = useState<number | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const viewerItem = threadMessages.find((item) => item.sharedFolder?.id === viewerShareId);
+  const previewEntry: SharedFolderEntry | undefined = viewerItem?.sharedFolder?.manifest?.entries
+    .find((entry) => entry.id === previewEntryId && entry.k === 'f');
+  const parentPath = (path: string) => {
+    const separator = path.lastIndexOf('/');
+    return separator < 0 ? '' : path.slice(0, separator);
+  };
+  const previewSiblings = previewEntry && viewerItem?.sharedFolder?.manifest
+    ? viewerItem.sharedFolder.manifest.entries.filter((entry) =>
+        entry.k === 'f' && parentPath(entry.p) === parentPath(previewEntry.p),
+      )
+    : [];
+  const previewSiblingIndex = previewSiblings.findIndex(({ id }) => id === previewEntry?.id);
 
   return <div className="orbit-thread">
     <header className="orbit-thread-header">
@@ -480,7 +504,25 @@ export function ConversationThread({
       manifest={viewerItem.sharedFolder.manifest}
       invalidCount={viewerItem.sharedFolder.invalidCount ?? 0}
       onClose={() => setViewerShareId(null)}
+      previewDisabled={viewerItem.sharedFolder.ownerId === user.id}
+      onPreviewFile={(entryId) => setPreviewEntryId(entryId)}
     />}
+    {viewerItem?.sharedFolder?.status === 'ready' &&
+      viewerItem.sharedFolder.ownerId !== user.id &&
+      previewEntry &&
+      deviceIdentity && <PreviewPane
+        key={previewEntry.id}
+        shareId={viewerItem.sharedFolder.id}
+        conversation={conversation}
+        identity={deviceIdentity}
+        entry={previewEntry}
+        previousEntry={previewSiblingIndex > 0 ? previewSiblings[previewSiblingIndex - 1] : undefined}
+        nextEntry={previewSiblingIndex >= 0 ? previewSiblings[previewSiblingIndex + 1] : undefined}
+        sessionManager={previewSessionManager}
+        onSignal={onPreviewSignal}
+        onNavigate={(entryId) => setPreviewEntryId(entryId)}
+        onClose={() => setPreviewEntryId(null)}
+      />}
     {viewerItem?.sharedFolder?.status === 'revoked' && <div className="orbit-folder-backdrop" role="presentation">
       <section className="orbit-folder-dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-folder-revoked-title">
         <h2 id="orbit-folder-revoked-title">This folder is no longer shared</h2>

@@ -12,7 +12,7 @@ import {
 interface SharedFolderComposerProps {
   peerName: string
   disabled: boolean
-  onShare: (manifest: SharedFolderManifest, shareId: string) => Promise<void>
+  onShare: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder) => Promise<void>
   onClose: () => void
 }
 
@@ -88,7 +88,7 @@ export function SharedFolderComposer({
     setSending(true)
     setError("")
     try {
-      await onShare(manifest, crypto.randomUUID())
+      await onShare(manifest, crypto.randomUUID(), picked!)
       onClose()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not share this folder.")

@@ -5,18 +5,15 @@ import {
   type SharedFolderManifest,
 } from "../../shared/sharedFolders"
 
-interface FolderFileHandle {
-  getFile(): Promise<File>
-}
-
-interface FolderDirectoryHandle {
-  name: string
-  entries(): AsyncIterable<[string, FolderDirectoryHandle | FolderFileHandle]>
+export interface LocalFolderDirectoryHandle extends FileSystemDirectoryHandle {
+  entries(): AsyncIterable<[string, LocalFolderDirectoryHandle | FileSystemFileHandle]>
 }
 
 export interface PickedFolder {
   rootName: string
   entries: SharedFolderEntry[]
+  handle?: LocalFolderDirectoryHandle
+  filesByPath?: Map<string, File>
 }
 
 export class FolderScanLimitError extends Error {
@@ -27,8 +24,8 @@ export class FolderScanLimitError extends Error {
 }
 
 function isDirectoryHandle(
-  handle: FolderDirectoryHandle | FolderFileHandle,
-): handle is FolderDirectoryHandle {
+  handle: LocalFolderDirectoryHandle | FileSystemFileHandle,
+): handle is LocalFolderDirectoryHandle {
   return "entries" in handle
 }
 
@@ -64,12 +61,13 @@ function yieldToEventLoop(): Promise<void> {
 }
 
 async function scanDirectory(
-  root: FolderDirectoryHandle,
+  root: LocalFolderDirectoryHandle,
   signal: AbortSignal,
   onProgress: (count: number) => void,
 ): Promise<PickedFolder> {
   const entries: SharedFolderEntry[] = []
-  const queue: Array<{ handle: FolderDirectoryHandle; path: string }> = [
+  const filesByPath = new Map<string, File>()
+  const queue: Array<{ handle: LocalFolderDirectoryHandle; path: string }> = [
     { handle: root, path: "" },
   ]
   let scanned = 0
@@ -78,7 +76,7 @@ async function scanDirectory(
     if (signal.aborted) throw new DOMException("Scan cancelled", "AbortError")
     const current = queue.shift()
     if (!current) continue
-    const children: Array<{ name: string; path: string; handle: FolderDirectoryHandle | FolderFileHandle }> = []
+    const children: Array<{ name: string; path: string; handle: LocalFolderDirectoryHandle | FileSystemFileHandle }> = []
     for await (const [name, handle] of current.handle.entries()) {
       if (signal.aborted) throw new DOMException("Scan cancelled", "AbortError")
       if (isJunkName(name)) continue
@@ -98,6 +96,7 @@ async function scanDirectory(
           return { directory: { handle, path }, entry: { p: path, k: "d" as const } }
         }
         const file = await handle.getFile()
+        filesByPath.set(path, file)
         return {
           entry: { p: path, k: "f" as const, s: file.size, m: file.lastModified },
         }
@@ -115,7 +114,7 @@ async function scanDirectory(
       await yieldToEventLoop()
     }
   }
-  return { rootName: root.name, entries }
+  return { rootName: root.name, entries, handle: root, filesByPath }
 }
 
 async function selectFallbackFolder(
@@ -162,6 +161,7 @@ async function selectFallbackFolder(
         const rootName = files[0].webkitRelativePath.split("/")[0]
         const entries: SharedFolderEntry[] = []
         const directoryPaths = new Set<string>()
+        const filesByPath = new Map<string, File>()
         for (let offset = 0; offset < files.length; offset += 16) {
           if (signal.aborted) {
             resolve(null)
@@ -187,6 +187,7 @@ async function selectFallbackFolder(
               s: file.size,
               m: file.lastModified,
             })
+            filesByPath.set(relative, file)
             if (entries.length > SHARED_FOLDER_LIMITS.maxEntries) {
               reject(new FolderScanLimitError("This folder has more than 50,000 items. Choose a smaller folder."))
               return
@@ -196,7 +197,7 @@ async function selectFallbackFolder(
           await yieldToEventLoop()
         }
         // The directory-input fallback cannot discover empty directories because browsers expose files only.
-        resolve({ rootName, entries })
+        resolve({ rootName, entries, filesByPath })
       })().catch(reject)
     }
     input.addEventListener("change", onChange, { once: true })
@@ -212,7 +213,7 @@ export async function pickFolder(
   onProgress: (count: number) => void,
 ): Promise<PickedFolder | null> {
   const pickerWindow = window as Window & {
-    showDirectoryPicker?: (options: { mode: "read" }) => Promise<FolderDirectoryHandle>
+    showDirectoryPicker?: (options: { mode: "read" }) => Promise<LocalFolderDirectoryHandle>
   }
   if (pickerWindow.showDirectoryPicker) {
     try {

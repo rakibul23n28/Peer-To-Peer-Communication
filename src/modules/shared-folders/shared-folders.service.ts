@@ -33,6 +33,10 @@ export class SharedFoldersService {
     return this.repository.get(id, userId)
   }
 
+  previewContext(id: string, userId: string) {
+    return this.repository.previewContext(id, userId)
+  }
+
   async revoke(id: string, userId: string) {
     const result = await this.repository.revoke(id, userId)
     this.events.publish({

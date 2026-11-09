@@ -131,6 +131,21 @@ test("normalizes Prisma Buffer JSON values in shared-folder records", () => {
   })
   assert.equal(record.ciphertext, ciphertext.toString("base64"))
   assert.equal(record.iv, iv.toString("base64"))
+
+  const typedArrayJson = sharedFolderRecordSchema.parse({
+    id: shareId,
+    conversationId,
+    ownerId: userId,
+    ciphertext: JSON.parse(JSON.stringify(new Uint8Array(ciphertext))),
+    iv: JSON.parse(JSON.stringify(new Uint8Array(iv))),
+    formatVersion: 1,
+    compressed: false,
+    payloadBytes: ciphertext.length,
+    createdAt: new Date("2026-11-09T00:00:00.000Z").toISOString(),
+    revokedAt: null,
+  })
+  assert.equal(typedArrayJson.ciphertext, ciphertext.toString("base64"))
+  assert.equal(typedArrayJson.iv, iv.toString("base64"))
 })
 
 test("serializes the create response to base64 instead of returning Prisma byte objects", async () => {

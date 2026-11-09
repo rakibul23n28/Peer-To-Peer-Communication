@@ -45,6 +45,18 @@ The authenticated API endpoint supplies the configured TURN credentials to the W
 
 Large-file receiving uses browser disk-backed storage when available. Browsers without that storage support are limited to 64 MiB per received file; available storage quota and the recipient device's resources can impose a lower practical limit. The sender and recipient both need a working WebRTC route, and the recipient must keep the conversation open until verification completes.
 
+### Remote file preview (Step 2)
+
+A recipient can open a supported file from a shared-folder tree while the folder owner is online. The recipient requests byte ranges by the manifest's numeric entry ID over an ordered WebRTC data channel; file names, paths, and file bytes are not sent to or stored by the API. Preview chunks are additionally AES-GCM encrypted with session keys derived using the existing ECDH/HKDF helper. The API validates the active share, participant, signaling direction, block state, and signaling rate, then relays only WebRTC signaling.
+
+The owner must keep Orbit open and allow access to the shared folder. Chromium's directory picker handle is retained in IndexedDB so permission can be re-granted after reload. In browsers that only offer `webkitdirectory`, the selected `File` objects are held in memory; after reload the owner must select the same folder again. Revoking the share closes active preview sessions.
+
+Previews are read-only and temporary. The viewer uses memory and object URLs, asks the private `/__preview/` Service Worker for byte ranges where available, and requests cancellation when a preview closes or a media element seeks. Responses are marked `no-store` and `nosniff`. A browser without usable Service Worker streaming can preview whole files only up to 64 MiB. Orbit does not provide a download or save action.
+
+Supported previews are images (JPG/JPEG, PNG, WebP, GIF, AVIF, BMP, ICO, SVG in an image element only), PDF, plain text and Markdown, MP4/WebM video, browser-supported MOV/M4V video, MP3/WAV and browser-supported M4A/OGG/FLAC/AAC audio, and DOCX. Extensions are checked against file signatures before rendering; unsupported or mismatched files are not previewed. Text is limited to 10 MiB and DOCX to 25 MiB. DOCX output is simplified, sanitized, and shown in a sandboxed frame; legacy DOC files are not supported. Video/audio codecs depend on the recipient browser.
+
+Use a current browser with WebRTC and Web Crypto support; Service Worker streaming requires HTTPS (or localhost). If peers cannot establish a direct connection, configure the same TURN settings described above: the viewer displays whether the selected connection is relayed. STUN alone does not work on every mobile carrier, office, school, or restrictive Wi-Fi network. The owner must be online for the entire preview; this feature does not synchronize changed files or retain a copy on the server.
+
 > **Privacy note:** Orbit is designed so message plaintext is encrypted in the browser before it is sent to the server. Keep account credentials and device identity material private, use HTTPS/WSS in production, and review the implementation and deployment configuration before relying on the application for sensitive communications.
 
 ## Technology

@@ -96,6 +96,72 @@ const shareViewingSchema = z.object({
   viewing: z.boolean(),
 }).strict()
 
+function errorCodeOf(error: unknown, depth = 0): string | undefined {
+  if (depth > 3 || typeof error !== "object" || error === null) return undefined
+  if ("code" in error && typeof error.code === "string") return error.code
+  if ("errorCode" in error && typeof error.errorCode === "string") return error.errorCode
+  return "cause" in error ? errorCodeOf(error.cause, depth + 1) : undefined
+}
+
+function isDatabaseUnavailableError(error: unknown): boolean {
+  const code = errorCodeOf(error)
+  return Boolean(code && (
+    /^(08|53)/.test(code) ||
+    ["P1001", "P1002", "P1017", "P2024", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND"].includes(code)
+  ))
+}
+
+function errorDescription(error: unknown): string {
+  const type = error instanceof Error ? error.name : typeof error
+  const code = errorCodeOf(error)
+  return code ? `${type}/${code}` : type
+}
+
+function shareUpdateFailure(error: unknown): { code: string; message: string } {
+  if (isDatabaseUnavailableError(error)) {
+    return {
+      code: "DATABASE_UNAVAILABLE",
+      message: "The database is temporarily unreachable. Folder status could not be updated.",
+    }
+  }
+  if (error instanceof HttpException) {
+    if (error.getStatus() === 429) {
+      return {
+        code: "RATE_LIMITED",
+        message: "Folder status updates are arriving too quickly. Wait a moment and retry.",
+      }
+    }
+    if (error.getStatus() === 404 || error.getStatus() === 403) {
+      return {
+        code: "SHARE_NOT_ACTIVE",
+        message: "This folder is no longer active or is not available to this account.",
+      }
+    }
+  }
+  if (error instanceof Error && /rate limited/i.test(error.message)) {
+    return {
+      code: "RATE_LIMITED",
+      message: "Folder status updates are arriving too quickly. Wait a moment and retry.",
+    }
+  }
+  if (error instanceof Error && /presence connection is unavailable/i.test(error.message)) {
+    return {
+      code: "PRESENCE_CONNECTION_EXPIRED",
+      message: "The live presence connection expired. Reconnect and try again.",
+    }
+  }
+  if (error instanceof Error && /only the folder owner can report availability/i.test(error.message)) {
+    return {
+      code: "SHARE_OWNER_REQUIRED",
+      message: "Only the folder owner can publish its availability.",
+    }
+  }
+  return {
+    code: "SHARE_UPDATE_REJECTED",
+    message: "Folder status could not be updated. Check that the share is active and try again.",
+  }
+}
+
 const audioCallInviteSchema = z.object({
   callId: z.string().uuid(),
   conversationId: z.string().uuid(),
@@ -736,14 +802,33 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     let context: Awaited<ReturnType<SharedFoldersService["previewContext"]>>
     try {
       context = await this.sharedFolders.previewContext(input.shareId, userId)
-    } catch {
-      this.sendToSocket(client, {
+    } catch (error) {
+      const databaseUnavailable = isDatabaseUnavailableError(error)
+      const session = this.previewSessions.get(`${input.shareId}:${input.sessionId}`)
+      const recipients = databaseUnavailable && session
+        ? [userId, session.viewerId, session.ownerId]
+        : [userId]
+      const reason = databaseUnavailable ? "server_unavailable" : "offline"
+      const unavailable = {
         type: "preview.unavailable",
         id: randomUUID(),
         ts: Date.now(),
-        payload: { shareId: input.shareId, sessionId: input.sessionId, reason: "offline" },
-      })
-      return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: false } }
+        payload: {
+          shareId: input.shareId,
+          sessionId: input.sessionId,
+          reason,
+          ...(databaseUnavailable ? { code: "DATABASE_UNAVAILABLE" } : {}),
+        },
+      }
+      for (const recipientId of new Set(recipients)) this.sendToUser(recipientId, unavailable)
+      return {
+        type: "preview.signal.ack",
+        id: input.sessionId,
+        payload: {
+          delivered: false,
+          ...(databaseUnavailable ? { code: "DATABASE_UNAVAILABLE" } : {}),
+        },
+      }
     }
     const isOwner = context.ownerId === userId
     if (!previewSignalDirectionValid(isOwner, input.kind)) {
@@ -785,7 +870,36 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       throw new HttpException("Preview session not found.", 404)
     }
 
-    const ownerVisibility = await this.presence.currentAvailability(input.shareId, context.ownerId)
+    let ownerVisibility: Awaited<ReturnType<PresenceService["currentAvailability"]>>
+    try {
+      ownerVisibility = await this.presence.currentAvailability(input.shareId, context.ownerId)
+    } catch (error) {
+      if (!isDatabaseUnavailableError(error)) throw error
+      const session = this.previewSessions.get(sessionKey)
+      const unavailable = {
+        type: "preview.unavailable",
+        id: randomUUID(),
+        ts: now,
+        payload: {
+          shareId: input.shareId,
+          sessionId: input.sessionId,
+          reason: "server_unavailable",
+          code: "DATABASE_UNAVAILABLE",
+        },
+      }
+      for (const recipientId of new Set([
+        userId,
+        ...(session ? [session.viewerId, session.ownerId] : []),
+      ])) {
+        this.sendToUser(recipientId, unavailable)
+      }
+      this.previewSessions.delete(sessionKey)
+      return {
+        type: "preview.signal.ack",
+        id: input.sessionId,
+        payload: { delivered: false, code: "DATABASE_UNAVAILABLE" },
+      }
+    }
     const availableOwnerSockets = input.kind === "offer" && !isOwner
       ? [...this.server.clients].filter((socket) => {
           const connectionId = this.presenceConnectionIds.get(socket)
@@ -855,15 +969,50 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   }
 
   async reportShareAvailability(client: WebSocket, body: unknown) {
-    await this.authenticatedUser(client)
+    const userId = await this.authenticatedUser(client)
     const input = shareAvailabilitySchema.parse(body)
     const connectionId = this.presenceConnectionIds.get(client)
+    if (!connectionId) {
+      const failure = {
+        code: "PRESENCE_CONNECTION_EXPIRED",
+        message: "The live presence connection expired. Reconnect and try again.",
+      }
+      return {
+        type: "share.availability.ack",
+        id: input.shareId,
+        payload: { accepted: false, ...failure },
+      }
+    }
     try {
-      if (connectionId) await this.presence.setAvailability(connectionId, input)
+      await this.presence.setAvailability(connectionId, input)
       return { type: "share.availability.ack", id: input.shareId, payload: { accepted: true } }
     } catch (error) {
-      this.logger.warn(`Share availability update rejected (${error instanceof Error ? error.name : "unknown"})`)
-      return { type: "share.availability.ack", id: input.shareId, payload: { accepted: false } }
+      if (error instanceof Error && /presence connection is unavailable/i.test(error.message)) {
+        try {
+          const snapshot = await this.presence.connect(connectionId, userId)
+          this.sendToSocket(client, {
+            type: "presence.snapshot",
+            id: randomUUID(),
+            ts: Date.now(),
+            payload: snapshot,
+          })
+          await this.presence.setAvailability(connectionId, input)
+          return {
+            type: "share.availability.ack",
+            id: input.shareId,
+            payload: { accepted: true, recoveredPresence: true },
+          }
+        } catch (recoveryError) {
+          error = recoveryError
+        }
+      }
+      const failure = shareUpdateFailure(error)
+      this.logger.warn(`Share availability update rejected (${failure.code}; ${errorDescription(error)})`)
+      return {
+        type: "share.availability.ack",
+        id: input.shareId,
+        payload: { accepted: false, ...failure },
+      }
     }
   }
 
@@ -875,8 +1024,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       if (connectionId) await this.presence.setViewing(connectionId, input.shareId, input.viewing)
       return { type: "share.viewing.ack", id: input.shareId, payload: { accepted: true } }
     } catch (error) {
-      this.logger.warn(`Share viewing update rejected (${error instanceof Error ? error.name : "unknown"})`)
-      return { type: "share.viewing.ack", id: input.shareId, payload: { accepted: false } }
+      const failure = shareUpdateFailure(error)
+      this.logger.warn(`Share viewing update rejected (${failure.code}; ${errorDescription(error)})`)
+      return { type: "share.viewing.ack", id: input.shareId, payload: { accepted: false, ...failure } }
     }
   }
 

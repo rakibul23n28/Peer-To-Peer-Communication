@@ -452,7 +452,36 @@ export default function App() {
   }
 
   if (phase === 'signed-in' && user) {
-    return <Suspense fallback={<main className="auth-screen" aria-busy="true"><div className="auth-card splash"><p>Opening Orbit…</p><div className="skeleton-line" /></div></main>}>
+    return <Suspense fallback={<main className="auth-screen orbit-opening" aria-busy="true" aria-live="polite">
+      <style>{`
+        .orbit-opening { display: grid; grid-template-columns: 1fr; place-items: center; text-align: center; }
+        .orbit-opening__card { width: min(100%, 420px); padding: clamp(32px, 6vw, 56px); }
+        .orbit-opening__visual { position: relative; display: grid; place-items: center; width: 148px; height: 148px; margin: 0 auto 30px; }
+        .orbit-opening__ring { position: absolute; inset: 5px; border: 1px solid currentColor; border-radius: 50%; opacity: .18; animation: orbit-opening-spin 9s linear infinite; }
+        .orbit-opening__ring::before { content: ''; position: absolute; top: 12px; left: 21px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 18px currentColor; }
+        .orbit-opening__ring--inner { inset: 22px; border-style: dashed; opacity: .12; animation-direction: reverse; animation-duration: 15s; }
+        .orbit-opening__mark { width: 64px; height: 64px; color: inherit; filter: drop-shadow(0 0 18px currentColor); animation: orbit-opening-breathe 2.4s ease-in-out infinite; }
+        .orbit-opening__eyebrow { margin: 0 0 12px; font-size: .68rem; letter-spacing: .18em; opacity: .62; }
+        .orbit-opening__title { margin: 0; font-size: clamp(1.7rem, 4vw, 2.2rem); letter-spacing: -.04em; }
+        .orbit-opening__copy { margin: 10px 0 28px; opacity: .66; }
+        .orbit-opening__track { width: min(100%, 220px); height: 2px; margin: 0 auto; overflow: hidden; border-radius: 9px; background: currentColor; opacity: .18; }
+        .orbit-opening__progress { width: 38%; height: 100%; border-radius: inherit; background: currentColor; animation: orbit-opening-progress 1.8s ease-in-out infinite; }
+        @keyframes orbit-opening-spin { to { transform: rotate(360deg); } }
+        @keyframes orbit-opening-breathe { 50% { transform: scale(1.08); opacity: .76; } }
+        @keyframes orbit-opening-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(290%); } }
+        @media (prefers-reduced-motion: reduce) { .orbit-opening__ring, .orbit-opening__mark, .orbit-opening__progress { animation: none; } }
+      `}</style>
+      <section className="auth-card splash orbit-opening__card" aria-label="Opening Orbit">
+        <div className="orbit-opening__visual" aria-hidden="true">
+          <span className="orbit-opening__ring" /><span className="orbit-opening__ring orbit-opening__ring--inner" />
+          <OrbitMark className="orbit-opening__mark" />
+        </div>
+        <p className="orbit-opening__eyebrow">A PRIVATE SPACE, JUST FOR YOU</p>
+        <h1 className="orbit-opening__title">Opening Orbit<span aria-hidden="true">…</span></h1>
+        <p className="orbit-opening__copy">Bringing your conversations into view.</p>
+        <div className="orbit-opening__track" role="progressbar" aria-label="Opening Orbit"><div className="orbit-opening__progress" /></div>
+      </section>
+    </main>}>
       <AuthenticatedHome user={user} onSignOut={handleSignOut} busy={isBusy} message={message} />
     </Suspense>;
   }

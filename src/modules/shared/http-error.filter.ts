@@ -89,6 +89,14 @@ export class HttpErrorFilter implements ExceptionFilter {
         code = "DATABASE_TRANSACTION_FAILED"
 
         message = "The database operation could not be completed. Please retry."
+      } else if (
+        ["P1001", "P1002", "P1017", "P2024"].includes(exception.code)
+      ) {
+        status = HttpStatus.SERVICE_UNAVAILABLE
+
+        code = "DATABASE_UNAVAILABLE"
+
+        message = "Database is temporarily unreachable. Please try again shortly."
       }
     } else if (exception instanceof Prisma.PrismaClientInitializationError) {
       status = HttpStatus.SERVICE_UNAVAILABLE
@@ -137,9 +145,13 @@ export class HttpErrorFilter implements ExceptionFilter {
         env.NODE_ENV !== "production" && exception instanceof Error
           ? exception.stack?.split("\n").slice(1, 3).join(" <- ")
           : undefined
-      this.logger.error(
-        `Request failed with ${errorName} (code: ${errorCode})${errorMessage ? `: ${errorMessage}` : ""}${errorLocation ? ` at ${errorLocation}` : ""}`,
-      )
+      const logMessage =
+        `Request failed with ${errorName} (code: ${errorCode})${errorMessage ? `: ${errorMessage}` : ""}${errorLocation ? ` at ${errorLocation}` : ""}`
+      if (status === HttpStatus.SERVICE_UNAVAILABLE) {
+        this.logger.warn(logMessage)
+      } else {
+        this.logger.error(logMessage)
+      }
     }
 
     response.status(status).json({

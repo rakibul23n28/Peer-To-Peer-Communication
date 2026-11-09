@@ -4,6 +4,7 @@ import type { ConversationSummary, EncryptedMessage, UserIdentity } from '../ses
 import type { DeviceIdentity } from '../keyStore';
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitIcon } from './OrbitIcon';
+import { IconButton } from './IconButton';
 import { initials } from './OrbitMark';
 import { AudioCallPanel, type AudioCallView } from './AudioCallPanel';
 import type { SharedFolderEntry, SharedFolderRecord, SharedFolderManifest } from '../../shared/sharedFolders';
@@ -68,6 +69,8 @@ interface ConversationThreadProps {
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
   detailsOpen: boolean;
+  openFolderComposerRequest: boolean;
+  onFolderComposerRequestHandled: () => void;
   audioCall: AudioCallView | null;
   remoteAudioStream: MediaStream | null;
   audioCallDisabled: boolean;
@@ -75,7 +78,6 @@ interface ConversationThreadProps {
   deviceIdentity: DeviceIdentity | null;
   previewSessionManager: PreviewSessionManager;
   onBack: () => void;
-  onToggleNavigation: () => void;
   onToggleDetails: () => void;
   onRefreshPeerKey: () => void;
   onStartAudioCall: () => void;
@@ -181,6 +183,8 @@ export function ConversationThread({
   hasOlderMessages,
   loadingOlderMessages,
   detailsOpen,
+  openFolderComposerRequest,
+  onFolderComposerRequestHandled,
   audioCall,
   remoteAudioStream,
   audioCallDisabled,
@@ -188,7 +192,6 @@ export function ConversationThread({
   deviceIdentity,
   previewSessionManager,
   onBack,
-  onToggleNavigation,
   onToggleDetails,
   onRefreshPeerKey,
   onStartAudioCall,
@@ -228,18 +231,57 @@ export function ConversationThread({
 }: ConversationThreadProps) {
   let previousDay = '';
   const [folderComposerOpen, setFolderComposerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!openFolderComposerRequest) return;
+    setFolderComposerOpen(true);
+    onFolderComposerRequestHandled();
+  }, [onFolderComposerRequestHandled, openFolderComposerRequest]);
   const [viewerShareId, setViewerShareId] = useState<string | null>(null);
   const [previewEntryId, setPreviewEntryId] = useState<number | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [downloadError, setDownloadError] = useState('');
-  const [remoteDownloadAllowed, setRemoteDownloadAllowed] = useState(false);
+  const [remoteDownloadAllowed, setRemoteDownloadAllowed] = useState<boolean | null>(null);
   const [downloadStarter, setDownloadStarter] = useState<
     typeof import('../shared-folders/downloadEngine').startFileDownload | null
   >(null);
+  const [folderDownloadStarter, setFolderDownloadStarter] = useState<
+    typeof import('../shared-folders/downloadEngine').startFolderDownload | null
+  >(null);
+  const [folderDownloadProgress, setFolderDownloadProgress] = useState<{
+    completedFiles: number;
+    totalFiles: number;
+    currentPath: string;
+  } | null>(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const viewerItem = threadMessages.find((item) => item.sharedFolder?.id === viewerShareId);
+  const activeViewerShareId = viewerItem?.sharedFolder?.id;
+  const activeViewerOwnerId = viewerItem?.sharedFolder?.ownerId;
   const viewerAvailability = viewerItem?.sharedFolder
     ? availabilityByShare[viewerItem.sharedFolder.id]
+    : undefined;
+  const viewerAccessMessage = viewerItem?.sharedFolder?.ownerId !== user.id
+    ? viewerAvailability?.state === 'unavailable'
+      ? 'The owner has paused this folder. You can ask them to open it again.'
+      : viewerAvailability?.state === 'needs_permission'
+        ? 'The owner needs to allow Orbit to access this folder again.'
+        : viewerAvailability?.state === 'needs_reselect'
+          ? 'The owner needs to choose this folder again before it can be opened.'
+          : viewerAvailability?.state === 'revoked'
+            ? 'This folder is no longer shared.'
+            : viewerAvailability?.state === 'available' && !viewerAvailability.downloads
+              ? 'Preview is available, but the owner has disabled downloads.'
+              : viewerAvailability?.state === 'available' && !downloadStarter
+                ? 'Downloads are preparing on this device.'
+                        : viewerAvailability?.state === 'available' && viewerAvailability.downloads && remoteDownloadAllowed === null
+                  ? 'Checking the owner’s download permission.'
+                          : viewerAvailability?.state === 'available' && viewerAvailability.downloads && remoteDownloadAllowed === false
+                            ? 'Downloads are not currently permitted by the owner.'
+                        : viewerAvailability?.state === 'available'
+                          ? undefined
+                  : peerPresenceStatus === 'offline'
+                    ? 'The folder owner is offline. Try again when they are online.'
+                    : 'Checking whether the folder owner is available.'
     : undefined;
   const previewEntry: SharedFolderEntry | undefined = viewerItem?.sharedFolder?.manifest?.entries
     .find((entry) => entry.id === previewEntryId && entry.k === 'f');
@@ -254,8 +296,8 @@ export function ConversationThread({
     : [];
   const previewSiblingIndex = previewSiblings.findIndex(({ id }) => id === previewEntry?.id);
   useEffect(() => {
-    const shared = viewerItem?.sharedFolder;
-    if (!viewerShareId || !shared || shared.ownerId === user.id) return;
+    if (!viewerShareId || !activeViewerShareId || !activeViewerOwnerId ||
+      activeViewerOwnerId === user.id) return;
     let hiddenTimer: number | null = null;
     const sendViewing = () => {
       if (document.visibilityState === 'visible') onShareViewing(viewerShareId, true);
@@ -280,16 +322,20 @@ export function ConversationThread({
       document.removeEventListener('visibilitychange', onVisibilityChange);
       onShareViewing(viewerShareId, false);
     };
-  }, [onShareViewing, user.id, viewerItem?.sharedFolder, viewerShareId]);
+  }, [activeViewerOwnerId, activeViewerShareId, onShareViewing, user.id, viewerShareId]);
   useEffect(() => {
     const shared = viewerItem?.sharedFolder
     if (!shared || shared.status !== 'ready' || shared.ownerId === user.id || !deviceIdentity) {
       setRemoteDownloadAllowed(false)
       return
     }
+    setRemoteDownloadAllowed(null)
     let active = true
-    void import('../shared-folders/downloadEngine').then(({ startFileDownload }) => {
-      if (active) setDownloadStarter(() => startFileDownload)
+    void import('../shared-folders/downloadEngine').then(({ startFileDownload, startFolderDownload }) => {
+      if (active) {
+        setDownloadStarter(() => startFileDownload)
+        setFolderDownloadStarter(() => startFolderDownload)
+      }
     }).catch((error: unknown) => {
       if (active) setDownloadError(error instanceof Error ? error.message : 'Downloads could not be loaded.')
     })
@@ -297,7 +343,10 @@ export function ConversationThread({
     const unsubscribe = session.subscribeDownloadCapabilities((caps) => setRemoteDownloadAllowed(caps.download))
     void session.getDownloadCapabilities().then((caps) => {
       setRemoteDownloadAllowed(caps.download)
-    }).catch(() => setRemoteDownloadAllowed(false))
+    }).catch((error: unknown) => {
+      setRemoteDownloadAllowed(false)
+      setDownloadError(error instanceof Error ? error.message : 'Could not verify download access.')
+    })
     return () => {
       active = false
       unsubscribe()
@@ -331,6 +380,52 @@ export function ConversationThread({
       setDownloadError(error instanceof Error ? error.message : 'Could not start this download.');
     });
   };
+  const retryDownloadAccess = () => {
+    const shared = viewerItem?.sharedFolder;
+    if (!shared || !deviceIdentity) return;
+    setDownloadError('');
+    setRemoteDownloadAllowed(null);
+    const session = previewSessionManager.open(shared.id, conversation, deviceIdentity, onPreviewSignal);
+    void session.getDownloadCapabilities().then((caps) => {
+      setRemoteDownloadAllowed(caps.download);
+      if (!caps.download) setDownloadError('The owner has disabled downloads for this folder.');
+    }).catch((error: unknown) => {
+      setRemoteDownloadAllowed(false);
+      setDownloadError(error instanceof Error ? error.message : 'Could not verify download access.');
+    });
+  };
+
+  const downloadSharedFolder = () => {
+    const shared = viewerItem?.sharedFolder;
+    if (!shared?.manifest || shared.ownerId === user.id || !deviceIdentity) return;
+    if (!folderDownloadStarter) {
+      setDownloadError('Folder downloads are still loading. Try again in a moment.');
+      return;
+    }
+    setDownloadError('');
+    setFolderDownloadProgress({
+      completedFiles: 0,
+      totalFiles: shared.manifest.entries.filter(({ k }) => k === 'f').length,
+      currentPath: '',
+    });
+    const session = previewSessionManager.open(shared.id, conversation, deviceIdentity, onPreviewSignal);
+    void folderDownloadStarter({
+      session,
+      info: { shareId: shared.id, conversation },
+      manifest: shared.manifest,
+      onProgress: (completedFiles, totalFiles, currentPath) => {
+        setFolderDownloadProgress({ completedFiles, totalFiles, currentPath });
+      },
+      onFileProgress: (progress, id) => updateDownloadProgress(id, progress),
+      onCreated: (engine, path) => registerDownload(engine, path),
+    }).then(() => {
+      setFolderDownloadProgress(null);
+    }).catch((error: unknown) => {
+      setFolderDownloadProgress(null);
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setDownloadError(error instanceof Error ? error.message : 'The folder download could not be completed.');
+    });
+  };
 
   return <div className="orbit-thread">
     <header className="orbit-thread-header">
@@ -353,27 +448,17 @@ export function ConversationThread({
               onHangup={onHangupAudioCall}
               onToggleMute={onToggleAudioMute}
             />
-          : <button className="orbit-audio-call-button" type="button" onClick={onStartAudioCall} disabled={audioCallDisabled} aria-label={audioCallLabel} title={audioCallLabel}>
-              <OrbitIcon name="phone" />
-              <span>{audioCallLabel}</span>
-            </button>}
-        <button className="orbit-workspace-nav-toggle" type="button" onClick={onToggleNavigation} aria-label="Toggle navigation" title="Toggle navigation">
-          <OrbitIcon name="collapse" />
-        </button>
-        <button
+          : <IconButton action="call" className="orbit-audio-call-button" label={audioCallLabel} onClick={onStartAudioCall} disabled={audioCallDisabled} />}
+        <IconButton
+          action="toggleInspector"
           className={`orbit-details-toggle${detailsOpen ? ' is-active' : ''}`}
-          type="button"
+          label={detailsOpen ? 'Hide conversation details' : 'Show conversation details'}
           onClick={onToggleDetails}
-          aria-label={detailsOpen ? 'Hide conversation details' : 'Show conversation details'}
+          pressed={detailsOpen}
           aria-expanded={detailsOpen}
           aria-controls="orbit-details-panel"
-        >
-          <OrbitIcon name="settings" />
-          <span>Details</span>
-        </button>
-        {!peerBlocked && <button className="orbit-thread-block" type="button" title="Block contact" aria-label="Block contact" onClick={onBlock}>
-          <OrbitIcon name="shield" />
-        </button>}
+        />
+        {!peerBlocked && <IconButton action="blockContact" className="orbit-thread-block" onClick={onBlock} />}
       </div>
     </header>
 
@@ -451,24 +536,31 @@ export function ConversationThread({
                 {item.senderId !== user.id && <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'reshare')}>Ask {conversation.peer.displayName} to share again</button>}
               </div>}
               {item.sharedFolder.status === 'ready' && <div className="orbit-shared-folder-actions">
-                <button type="button" onClick={() => setViewerShareId(item.sharedFolder!.id)}>Open</button>
+                <IconButton action="openFolder" onClick={() => setViewerShareId(item.sharedFolder!.id)} />
                 {item.senderId !== user.id && availabilityByShare[item.sharedFolder.id]?.state !== 'available' &&
-                  <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'availability')}>
-                    Ask {conversation.peer.displayName} to open it
-                  </button>}
-                {item.senderId !== user.id && <button
-                  type="button"
-                  aria-pressed={watchedShareIds.has(item.sharedFolder.id)}
+                  <IconButton
+                    action="requestAccess"
+                    label={`Ask ${conversation.peer.displayName} to open the folder`}
+                    onClick={() => onRequestAccess(item.sharedFolder!.id, 'availability')}
+                  />}
+                {item.senderId !== user.id && availabilityByShare[item.sharedFolder.id]?.state !== 'available' && <IconButton
+                  action="notifyShare"
+                  label={watchedShareIds.has(item.sharedFolder.id) ? 'Stop notifications' : 'Notify me when available'}
+                  pressed={watchedShareIds.has(item.sharedFolder.id)}
                   onClick={() => onToggleWatch(item.sharedFolder!.id)}
-                >
-                  {watchedShareIds.has(item.sharedFolder.id) ? 'Stop notifications' : 'Notify me when available'}
-                </button>}
+                />}
                 {item.senderId !== user.id && availabilityByShare[item.sharedFolder.id]?.state === 'available' &&
                   availabilityByShare[item.sharedFolder.id]?.downloads === false &&
-                  <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'download_permission')}>
-                    Ask for download permission
-                  </button>}
-                {item.senderId === user.id && <button type="button" className="is-destructive" onClick={() => onRevokeFolder(item.sharedFolder!.id)}>Stop sharing</button>}
+                  <IconButton
+                    action="requestAccess"
+                    label="Ask for download permission"
+                    onClick={() => onRequestAccess(item.sharedFolder!.id, 'download_permission')}
+                  />}
+                {item.senderId === user.id && <IconButton
+                  action="stopSharing"
+                  label={`Stop sharing ${item.sharedFolder.manifest?.rootName ?? 'this folder'}`}
+                  onClick={() => onRevokeFolder(item.sharedFolder!.id)}
+                />}
               </div>}
             </div> : item.kind === 'file' && item.file ? <div className="orbit-file-card">
               <div className="orbit-file-card-heading">
@@ -528,13 +620,13 @@ export function ConversationThread({
               {receivedFiles[item.file.fileId] && item.file.mime.startsWith('video/') && <video className="orbit-file-preview" src={receivedFiles[item.file.fileId].url} controls />}
               {receivedFiles[item.file.fileId] && item.file.mime.startsWith('audio/') && <audio className="orbit-file-audio" src={receivedFiles[item.file.fileId].url} controls />}
               <div className="orbit-file-card-footer">
-                {receivedFiles[item.file.fileId] && <a href={receivedFiles[item.file.fileId].url} download={receivedFiles[item.file.fileId].name} aria-label={`Download ${receivedFiles[item.file.fileId].name}`} title="Download file"><OrbitIcon name="download" /></a>}
+                {receivedFiles[item.file.fileId] && <a className="orbit-icon-button" href={receivedFiles[item.file.fileId].url} download={receivedFiles[item.file.fileId].name} aria-label={`Download ${receivedFiles[item.file.fileId].name}`}><OrbitIcon name="download" /></a>}
                 {item.senderId !== user.id && item.file.status === 'offered' && <>
-                  <button type="button" onClick={() => onAcceptFile(item)} aria-label="Accept file" title="Accept file"><OrbitIcon name="check" /></button>
-                  <button type="button" onClick={() => onDeclineFile(item)} aria-label="Decline file" title="Decline file"><OrbitIcon name="close" /></button>
+                  <IconButton action="acceptFile" onClick={() => onAcceptFile(item)} />
+                  <IconButton action="declineFile" onClick={() => onDeclineFile(item)} />
                 </>}
-                {item.file.status === 'offered' && item.senderId === user.id && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file offer" title="Cancel offer"><OrbitIcon name="close" /></button>}
-                {(item.file.status === 'accepted' || item.file.status === 'transferring') && <button type="button" onClick={() => onCancelFile(item)} aria-label="Cancel file transfer" title="Cancel transfer"><OrbitIcon name="close" /></button>}
+                {item.file.status === 'offered' && item.senderId === user.id && <IconButton action="cancelTransfer" label="Cancel file offer" onClick={() => onCancelFile(item)} />}
+                {(item.file.status === 'accepted' || item.file.status === 'transferring') && <IconButton action="cancelTransfer" label="Cancel file transfer" onClick={() => onCancelFile(item)} />}
               </div>
             </div> : editingId === item.id ? <div className="orbit-edit-form">
               <textarea aria-label="Edit message" value={editDraft} onChange={(event) => onEditDraftChange(event.target.value)} />
@@ -575,21 +667,19 @@ export function ConversationThread({
               </div>}
               {!item.deletedAt && item.kind !== 'shared_folder' && <div className="orbit-message-actions" aria-label="Message actions">
                 {item.senderId === user.id && !item.sendState && <>
-                  <button type="button" title="Edit message" aria-label="Edit message" disabled={!conversation.peer.keyAvailable} onClick={() => onStartEdit(item)}><OrbitIcon name="edit" size={14} /></button>
-                  <button className="is-destructive" type="button" title="Delete message" aria-label="Delete message" onClick={() => onDeleteTextMessage(item)}><OrbitIcon name="trash" size={14} /></button>
+                  <IconButton action="editMessage" onClick={() => onStartEdit(item)} disabled={!conversation.peer.keyAvailable} />
+                  <IconButton action="deleteMessage" className="is-destructive" onClick={() => onDeleteTextMessage(item)} />
                 </>}
-                <button type="button" title="Reply to message" aria-label="Reply to message" onClick={() => onReply(item.id)}><OrbitIcon name="reply" size={14} /></button>
+                <IconButton action="reply" label="Reply to message" onClick={() => onReply(item.id)} />
                 {(() => {
                   const hasHeart = item.decryptedReactions.some((reaction) => reaction.userId === user.id && reaction.value === '❤️');
-                  return <button className={`orbit-heart-action${hasHeart ? ' is-active' : ''}`} type="button" title={hasHeart ? 'Remove heart reaction' : 'React with heart'} aria-label={hasHeart ? 'Remove your heart reaction' : 'React with heart'} aria-pressed={hasHeart} onClick={() => onReact(item, '❤️')}>
-                    <OrbitIcon name="heart" size={15} />
-                  </button>;
+                  return <IconButton action="react" className={`orbit-heart-action${hasHeart ? ' is-active' : ''}`} label={hasHeart ? 'Remove your heart reaction' : 'React with heart'} pressed={hasHeart} onClick={() => onReact(item, '❤️')} />;
                 })()}
               </div>}
             </div>
             {item.senderId === user.id && item.sendState === 'failed' && <div className="orbit-message-error" role="alert">
               <span>{item.sendError ?? 'Could not send this message.'}</span>
-              <button type="button" disabled={!conversation.peer.keyAvailable} onClick={() => onRetryQueuedMessage(item.clientMsgId)} aria-label="Retry sending message" title="Retry"><OrbitIcon name="send" size={14} /></button>
+              <IconButton action="retry" label="Retry sending message" disabled={!conversation.peer.keyAvailable} onClick={() => onRetryQueuedMessage(item.clientMsgId)} />
             </div>}
           </article>
         </div>;
@@ -602,7 +692,7 @@ export function ConversationThread({
         if (file) onOfferFile(file);
         event.currentTarget.value = '';
       }} />
-      {replyTo && <div className="orbit-replying">Replying to {threadMessages.find((item) => item.id === replyTo)?.plaintext.slice(0, 80) ?? 'message'}<button type="button" onClick={() => onReplyChange(null)} aria-label="Cancel reply"><OrbitIcon name="close" size={15} /></button></div>}
+      {replyTo && <div className="orbit-replying">Replying to {threadMessages.find((item) => item.id === replyTo)?.plaintext.slice(0, 80) ?? 'message'}<IconButton action="close" label="Cancel reply" onClick={() => onReplyChange(null)} /></div>}
       <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} maxLength={8000} aria-label="Message" placeholder={peerBlocked ? 'Unblock this contact to send messages…' : !conversation.peer.keyAvailable ? "Waiting for your contact's encryption key…" : deviceIdentityAvailable ? 'Write an encrypted message…' : 'Loading your device key…'} disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked} onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
@@ -612,19 +702,16 @@ export function ConversationThread({
       <div className="orbit-composer-bottom">
         <span>{outboxCount > 0 ? `${outboxCount} encrypted message${outboxCount === 1 ? '' : 's'} in outbox` : 'End-to-end encrypted · Enter to send'}</span>
         {outboxCount > 0 && <button className="orbit-outbox-retry" type="button" disabled={connection !== 'connected' || !conversation.peer.keyAvailable} onClick={onRetryAllQueued}>Retry queued</button>}
-        <button
+        <IconButton
+          action="attach"
           className="orbit-attach-action"
           ref={attachButtonRef}
-          type="button"
-          title="Open attachment options"
+          label="Open attachment options"
           disabled={!deviceIdentityAvailable || !conversation.peer.keyAvailable || peerBlocked}
           onClick={() => setAttachMenuOpen((open) => !open)}
-          aria-label="Open attachment options"
           aria-haspopup="menu"
           aria-expanded={attachMenuOpen}
-        >
-          <OrbitIcon name="paperclip" /><span>Attach</span>
-        </button>
+        />
         {attachMenuOpen && <div className="orbit-attach-menu" role="menu" aria-label="Attachment options" onKeyDown={(event) => {
           if (event.key === 'Escape') {
             setAttachMenuOpen(false);
@@ -658,11 +745,23 @@ export function ConversationThread({
     {viewerItem?.sharedFolder?.status === 'ready' && viewerItem.sharedFolder.manifest && <SharedFolderViewer
       manifest={viewerItem.sharedFolder.manifest}
       invalidCount={viewerItem.sharedFolder.invalidCount ?? 0}
+      accessMessage={viewerAccessMessage}
+      downloadError={downloadError}
+      onRetryDownload={retryDownloadAccess}
+      onRequestAccess={() => onRequestAccess(
+        viewerItem.sharedFolder!.id,
+        viewerAvailability?.state === 'available' &&
+          (viewerAvailability.downloads === false || remoteDownloadAllowed === false)
+          ? 'download_permission'
+          : 'availability',
+      )}
       onClose={() => setViewerShareId(null)}
+      onDownloadFolder={downloadSharedFolder}
+      folderDownloadProgress={folderDownloadProgress}
       previewDisabled={viewerItem.sharedFolder.ownerId === user.id || viewerAvailability?.state !== 'available'}
       onPreviewFile={(entryId) => setPreviewEntryId(entryId)}
       onDownloadFile={downloadSharedFile}
-      downloadDisabled={viewerItem.sharedFolder.ownerId === user.id || !deviceIdentity || !remoteDownloadAllowed || !downloadStarter || viewerAvailability?.state !== 'available' || !viewerAvailability.downloads}
+      downloadDisabled={viewerItem.sharedFolder.ownerId === user.id || !deviceIdentity || remoteDownloadAllowed !== true || !downloadStarter || !folderDownloadStarter || viewerAvailability?.state !== 'available' || !viewerAvailability.downloads}
     />}
     {downloadError && <p className="orbit-download-error" role="alert">{downloadError}</p>}
     {viewerItem?.sharedFolder?.status === 'ready' &&
@@ -677,7 +776,7 @@ export function ConversationThread({
         previousEntry={previewSiblingIndex > 0 ? previewSiblings[previewSiblingIndex - 1] : undefined}
         nextEntry={previewSiblingIndex >= 0 ? previewSiblings[previewSiblingIndex + 1] : undefined}
         sessionManager={previewSessionManager}
-        onDownload={remoteDownloadAllowed && downloadStarter && viewerAvailability?.state === 'available' && viewerAvailability.downloads
+        onDownload={remoteDownloadAllowed === true && downloadStarter && viewerAvailability?.state === 'available' && viewerAvailability.downloads
           ? () => downloadSharedFile(previewEntry.id)
           : undefined}
         onSignal={onPreviewSignal}

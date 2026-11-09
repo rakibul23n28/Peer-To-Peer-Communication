@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { OrbitConnectionState } from '../orbitSocket';
 import type { PrivacySettings, UserIdentity, UserSearchResult } from '../session';
@@ -22,7 +23,8 @@ interface OrbitDialogsProps {
   privacySettingsBusy: boolean;
   browserNotifications: boolean;
   includeFolderNames: boolean;
-  searchIndexEnabled: boolean;
+  compactDensity: boolean;
+  actionLabelMode: 'auto' | 'icons';
   onQueryChange: (value: string) => void;
   onOpenConversation: (person: UserSearchResult) => void;
   onClose: () => void;
@@ -32,6 +34,8 @@ interface OrbitDialogsProps {
   onPrivacySettingsChange: (settings: PrivacySettings) => void;
   onEnableBrowserNotifications: (enabled: boolean) => void;
   onIncludeFolderNamesChange: (enabled: boolean) => void;
+  onDensityChange: (compact: boolean) => void;
+  onActionLabelModeChange: (mode: 'auto' | 'icons') => void;
   onSignOut: () => void;
 }
 
@@ -60,7 +64,8 @@ export function OrbitDialogs({
   privacySettingsBusy,
   browserNotifications,
   includeFolderNames,
-  searchIndexEnabled,
+  compactDensity,
+  actionLabelMode,
   onQueryChange,
   onOpenConversation,
   onClose,
@@ -70,8 +75,11 @@ export function OrbitDialogs({
   onPrivacySettingsChange,
   onEnableBrowserNotifications,
   onIncludeFolderNamesChange,
+  onDensityChange,
+  onActionLabelModeChange,
   onSignOut,
 }: OrbitDialogsProps) {
+  const [settingsSection, setSettingsSection] = useState<'account' | 'appearance' | 'privacy' | 'contacts'>('account');
   if (!dialog) return null;
 
   function closeOnBackdrop(event: MouseEvent<HTMLDivElement>) {
@@ -98,14 +106,56 @@ export function OrbitDialogs({
         </div>}
       </>}
       {dialog === 'settings' && <>
-        <span className="eyebrow">SETTINGS / DEVICE</span>
-        <h2 id="orbit-dialog-title">Your space, your keys.</h2>
-        <p>Account and device details currently available for this session.</p>
-        <dl className="orbit-settings-list"><div><dt>Username</dt><dd>@{user.username}</dd></div><div><dt>Active key version</dt><dd>{user.keyVersion}</dd></div><div><dt>Device key</dt><dd>Verified against the active server key</dd></div><div><dt>Connection</dt><dd>{connectionLabel(connection)}</dd></div></dl>
-        <button className="orbit-primary-action" type="button" onClick={onCopyFingerprint}>Copy device fingerprint <span aria-hidden="true">↗</span></button>
-        <section className="orbit-privacy-settings" aria-labelledby="orbit-privacy-title">
-          <h3 id="orbit-privacy-title">Privacy & presence</h3>
-          <label>
+        <div className="orbit-settings-heading">
+          <span className="eyebrow">SETTINGS / DEVICE</span>
+          <h2 id="orbit-dialog-title">Your space, your keys.</h2>
+        </div>
+        <nav className="orbit-settings-nav" aria-label="Settings sections">
+          <button type="button" aria-current={settingsSection === 'account' ? 'page' : undefined} onClick={() => setSettingsSection('account')}><OrbitIcon name="user" size={16} /><span>Account</span></button>
+          <button type="button" aria-current={settingsSection === 'appearance' ? 'page' : undefined} onClick={() => setSettingsSection('appearance')}><OrbitIcon name="palette" size={16} /><span>Appearance</span></button>
+          <button type="button" aria-current={settingsSection === 'privacy' ? 'page' : undefined} onClick={() => setSettingsSection('privacy')}><OrbitIcon name="lock" size={16} /><span>Privacy</span></button>
+          <button type="button" aria-current={settingsSection === 'contacts' ? 'page' : undefined} onClick={() => setSettingsSection('contacts')}><OrbitIcon name="userX" size={16} /><span>Contacts</span></button>
+        </nav>
+        <div className="orbit-settings-page" key={settingsSection}>
+        {settingsSection === 'account' && <section className="orbit-settings-account">
+          <p>Essential details for this device and session.</p>
+          <div className="orbit-settings-status">
+            <span className={`orbit-settings-status-dot is-${connection}`} />
+            <span>{connectionLabel(connection)}</span>
+            <span className="orbit-settings-status-separator">·</span>
+            <span>End-to-end encrypted</span>
+          </div>
+          <dl className="orbit-settings-list">
+            <div><dt>Username</dt><dd>@{user.username}</dd></div>
+            <div><dt>Key version</dt><dd>{user.keyVersion}</dd></div>
+            <div><dt>Device identity</dt><dd>Verified</dd></div>
+          </dl>
+          <button className="orbit-primary-action" type="button" onClick={onCopyFingerprint}>
+            <OrbitIcon name="copy" size={16} />Copy device fingerprint
+          </button>
+          <button className="orbit-dialog-signout" type="button" disabled={busy} onClick={onSignOut}>Sign out of Orbit</button>
+        </section>}
+        {settingsSection === 'appearance' && <section className="orbit-privacy-settings" aria-labelledby="orbit-display-title">
+          <h3 id="orbit-display-title">Display</h3>
+          <label className="orbit-settings-row">
+            <input type="checkbox" checked={compactDensity} onChange={(event) => onDensityChange(event.target.checked)} />
+            <span><strong>Compact layout</strong></span>
+          </label>
+          <label className="orbit-privacy-select orbit-settings-row">
+            <span><strong>Controls</strong></span>
+            <select value={actionLabelMode} onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'auto' || value === 'icons') onActionLabelModeChange(value);
+            }}>
+              <option value="auto">Automatic</option>
+              <option value="icons">Icons only</option>
+            </select>
+          </label>
+        </section>
+        }
+        {settingsSection === 'privacy' && <section className="orbit-privacy-settings" aria-labelledby="orbit-privacy-title">
+          <h3 id="orbit-privacy-title">Privacy</h3>
+          <label className="orbit-settings-row">
             <input
               type="checkbox"
               checked={!privacySettings.presenceVisible}
@@ -115,9 +165,9 @@ export function OrbitDialogs({
                 presenceVisible: !event.target.checked,
               })}
             />
-            <span><strong>Appear offline</strong><small>Others see you as offline and can't start new previews or downloads until you turn this off. Transfers already in progress continue.</small><small>Who can see this: your conversation partners see offline while enabled.</small></span>
+            <span><strong>Appear offline</strong><small>Hide your presence</small></span>
           </label>
-          <label>
+          <label className="orbit-settings-row">
             <input
               type="checkbox"
               checked={privacySettings.showViewingActivity}
@@ -127,10 +177,10 @@ export function OrbitDialogs({
                 showViewingActivity: event.target.checked,
               })}
             />
-            <span><strong>Show when I'm viewing shared folders</strong><small>Actual file reads are visible to the folder owner because their device serves the data.</small><small>Who can see this: only the owner of the folder you open.</small></span>
+            <span><strong>Viewing activity</strong><small>Let folder owners see when you browse</small></span>
           </label>
-          <label className="orbit-privacy-select">
-            <span><strong>Accept access requests</strong><small>Who can send: contacts with an existing conversation.</small></span>
+          <label className="orbit-privacy-select orbit-settings-row">
+            <span><strong>Access requests</strong></span>
             <select
               value={privacySettings.acceptAccessRequests}
               disabled={privacySettingsBusy}
@@ -143,21 +193,21 @@ export function OrbitDialogs({
               <option value="off">Off</option>
             </select>
           </label>
-          <label>
+          <label className="orbit-settings-row">
             <input type="checkbox" checked={browserNotifications} onChange={(event) => onEnableBrowserNotifications(event.target.checked)} />
-            <span><strong>Browser notifications</strong><small>Notifications work only while Orbit is open in a tab. No push notification is sent when Orbit is closed.</small></span>
+            <span><strong>Browser alerts</strong><small>Only while Orbit is open</small></span>
           </label>
-          <label>
+          <label className="orbit-settings-row">
             <input type="checkbox" checked={includeFolderNames} onChange={(event) => onIncludeFolderNamesChange(event.target.checked)} />
-            <span><strong>Include folder names in notifications</strong><small>Names are local-only and may appear on your lock screen. Off by default.</small></span>
+            <span><strong>Show folder names</strong><small>Names may appear in alerts</small></span>
           </label>
-          <label>
-            <input type="checkbox" checked={searchIndexEnabled} disabled />
-            <span><strong>Index shared folders for search</strong><small>Local shared-folder search is not available yet. No search index is uploaded.</small></span>
-          </label>
-          <p><strong>What the server can see:</strong> ephemeral online/away/offline state, each active share’s availability and download-permission flag, a per-share viewing boolean, privacy settings, and access-request IDs, kind, status, timestamps, and optional opaque encrypted notes. It never sees folder or file names, paths, contents, which file is being read, transfer byte counts or speeds, or search queries.</p>
+          <details className="orbit-privacy-disclosure">
+            <summary>Data visibility</summary>
+            <p>Ephemeral online/away/offline state, each active share’s availability and download-permission flag, a per-share viewing boolean, privacy settings, and access-request IDs, kind, status, timestamps, and optional opaque encrypted notes. It never sees folder or file names, paths, contents, which file is being read, transfer byte counts or speeds, or search queries.</p>
+          </details>
         </section>
-        <div className="orbit-blocked-list">
+        }
+        {settingsSection === 'contacts' && <div className="orbit-blocked-list">
           <div className="orbit-blocked-list-heading"><strong>Blocked contacts</strong><button type="button" onClick={onRefreshBlocks}>Refresh</button></div>
           {loadingBlocks ? <p>Loading blocked contacts…</p> : blockedUsers.length === 0
             ? <p>No blocked contacts.</p>
@@ -165,8 +215,8 @@ export function OrbitDialogs({
               <span><strong>{contact.displayName}</strong><small>@{contact.username}</small></span>
               <button type="button" onClick={() => onUnblock(contact.id)}>Unblock</button>
             </div>)}
+        </div>}
         </div>
-        <button className="orbit-dialog-signout" type="button" disabled={busy} onClick={onSignOut}>Sign out of Orbit</button>
       </>}
     </section>
   </div>;

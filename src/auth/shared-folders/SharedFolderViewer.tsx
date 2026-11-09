@@ -9,6 +9,7 @@ import {
 } from "../../shared/sharedFolders"
 import { OrbitIcon } from "../components/OrbitIcon"
 import type { OrbitIconName } from "../components/OrbitIcon"
+import { IconButton } from "../components/IconButton"
 
 const rowHeight = 42
 const overscan = 8
@@ -28,8 +29,14 @@ interface SharedFolderViewerProps {
   onClose: () => void
   onPreviewFile?: (entryId: number) => void
   onDownloadFile?: (entryId: number) => void
+  onDownloadFolder?: () => void
+  folderDownloadProgress?: { completedFiles: number; totalFiles: number; currentPath: string } | null
   previewDisabled?: boolean
   downloadDisabled?: boolean
+  accessMessage?: string
+  downloadError?: string
+  onRequestAccess?: () => void
+  onRetryDownload?: () => void
 }
 
 function formatSize(size: number): string {
@@ -107,8 +114,14 @@ export function SharedFolderViewer({
   onClose,
   onPreviewFile,
   onDownloadFile,
+  onDownloadFolder,
+  folderDownloadProgress,
   previewDisabled = false,
   downloadDisabled = false,
+  accessMessage,
+  downloadError,
+  onRequestAccess,
+  onRetryDownload,
 }: SharedFolderViewerProps) {
   const root = useMemo(() => buildSharedFolderTree(manifest.entries), [manifest])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
@@ -218,12 +231,30 @@ export function SharedFolderViewer({
           <span className="eyebrow">SHARED FOLDER</span>
           <h2 id="orbit-folder-viewer-title">{manifest.rootName}</h2>
           <p>{files.length.toLocaleString()} files · {folders.toLocaleString()} folders · {formatSize(totalSize)}</p>
+          {folderDownloadProgress && <p className="orbit-folder-download-progress" role="status">
+            Downloading {folderDownloadProgress.completedFiles.toLocaleString()} of {folderDownloadProgress.totalFiles.toLocaleString()}
+            {folderDownloadProgress.currentPath && <> · {folderDownloadProgress.currentPath}</>}
+          </p>}
         </div>
+        {onDownloadFolder && <button
+          type="button"
+          className="orbit-folder-download-all"
+          disabled={downloadDisabled || Boolean(folderDownloadProgress)}
+          onClick={onDownloadFolder}
+        >
+          <OrbitIcon name="download" size={15} />
+          {folderDownloadProgress ? "Downloading…" : "Download folder"}
+        </button>}
         <button type="button" className="orbit-folder-close" aria-label="Close folder viewer" onClick={onClose}><OrbitIcon name="close" /></button>
       </header>
       {invalidCount > 0 && <p className="orbit-folder-invalid-note" role="status">
         {invalidCount.toLocaleString()} {invalidCount === 1 ? "item was" : "items were"} hidden because their names were invalid.
       </p>}
+      {(accessMessage || downloadError) && <div className={`orbit-folder-access-note${downloadError ? " is-error" : ""}`} role={downloadError ? "alert" : "status"}>
+        <span>{downloadError ?? accessMessage}</span>
+        {downloadError && onRetryDownload && <button type="button" onClick={onRetryDownload}>Retry download access</button>}
+        {!downloadError && accessMessage && onRequestAccess && <button type="button" onClick={onRequestAccess}>Ask owner for access</button>}
+      </div>}
       <div className="orbit-folder-tree-controls">
         <label className="orbit-folder-search">
           <OrbitIcon name="search" size={16} />
@@ -284,24 +315,24 @@ export function SharedFolderViewer({
               {row.node.kind === "f" && <span className="orbit-folder-tree-size">{formatSize(row.node.size ?? 0)}</span>}
               {row.node.kind === "d" && <span className="orbit-folder-tree-count">{row.node.children.size} items</span>}
               {row.node.kind === "f" && entryId !== undefined && <>
-                <button
-                  type="button"
-                  aria-label={`Preview ${row.node.name}`}
+                <IconButton
+                  action="preview"
+                  label={`Preview ${row.node.name}`}
                   disabled={previewDisabled}
                   onClick={(event) => {
                     event.stopPropagation()
                     onPreviewFile?.(entryId)
                   }}
-                >Preview</button>
-                <button
-                  type="button"
-                  aria-label={`Download ${row.node.name}`}
+                />
+                <IconButton
+                  action="download"
+                  label={`Download ${row.node.name}`}
                   disabled={downloadDisabled}
                   onClick={(event) => {
                     event.stopPropagation()
                     onDownloadFile?.(entryId)
                   }}
-                >Download</button>
+                />
               </>}
             </div>
           })}

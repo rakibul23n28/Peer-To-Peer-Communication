@@ -60,14 +60,14 @@ export function WorkspaceDetails({
       .slice(-20)
       .reverse();
   }, [messages, search]);
-  return <aside className="orbit-details-panel" id="orbit-details-panel" aria-label="Conversation details">
+  return <section className="orbit-details-panel orbit-details-page" id="orbit-details-panel" aria-label="Conversation details">
     <header className="orbit-details-header">
       <div>
         <span className="orbit-details-kicker">WORKSPACE</span>
         <h2>Conversation details</h2>
       </div>
-      <button className="orbit-details-close" type="button" onClick={onClose} aria-label="Close conversation details">
-        <OrbitIcon name="close" size={17} />
+      <button className="orbit-details-close" type="button" onClick={onClose} aria-label="Back to conversation">
+        <OrbitIcon name="back" size={17} />
       </button>
     </header>
 
@@ -140,5 +140,5 @@ export function WorkspaceDetails({
         </fieldset>
       </section>
     </div>
-  </aside>;
+  </section>;
 }

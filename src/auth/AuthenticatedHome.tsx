@@ -46,7 +46,7 @@ import { createSharedFolder, listSharedFolders, revokeSharedFolder } from './sha
 import { makeManifest, pickFolder, type PickedFolder } from './shared-folders/picker';
 import { PreviewServer, type PreviewServerNotice } from './shared-folders/previewServer';
 import { PreviewSessionManager } from './shared-folders/previewSession';
-import { DownloadsPanel } from './shared-folders/DownloadsPanel';
+import { DownloadsPage } from './shared-folders/DownloadsPage';
 import {
   listWatchedShares,
   markWatchNotified,
@@ -73,7 +73,12 @@ import { PeerAudioCall, type PeerAudioSignal } from './peerAudioCall';
 import type { AudioCallView } from './components/AudioCallPanel';
 import { ConversationThread, type FileTransferProgress, type ThreadMessage } from './components/ConversationThread';
 import { ConversationSidebar } from './components/ConversationSidebar';
-import { EmptyConversationState } from './components/EmptyConversationState';
+import { Dashboard } from './components/Dashboard';
+import { PeoplePage } from './components/PeoplePage';
+import { IncomingAccessRequests } from './components/IncomingAccessRequests';
+import { IconButton } from './components/IconButton';
+import { OrbitIcon } from './components/OrbitIcon';
+import { initials } from './components/OrbitMark';
 import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
 import { WorkspaceDetails } from './components/WorkspaceDetails';
 import {
@@ -309,9 +314,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [includeFolderNames, setIncludeFolderNames] = useState(
     () => readWorkspacePreference('orbit-notification-folder-names', 'false') === 'true',
   );
-  const [searchIndexEnabled, setSearchIndexEnabled] = useState(
-    () => readWorkspacePreference('orbit-search-index-enabled', 'true') === 'true',
-  );
   const [localAvailability, setLocalAvailability] = useState<Record<string, ClientAvailability>>({});
   const [watchedShareIds, setWatchedShareIds] = useState<Set<string>>(new Set());
   const [watchesLoaded, setWatchesLoaded] = useState(false);
@@ -328,15 +330,27 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     kind: 'availability' | 'download_permission' | 'reshare';
   } | null>(null);
   const [accessRequestNote, setAccessRequestNote] = useState('');
+  const [accessRequestError, setAccessRequestError] = useState('');
   const [accessRequestSending, setAccessRequestSending] = useState(false);
   const [previewOwnerNotice, setPreviewOwnerNotice] = useState<PreviewServerNotice | null>(null);
   const [refreshingPeerKey, setRefreshingPeerKey] = useState(false);
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
+  const [dashboardFolderMessages, setDashboardFolderMessages] = useState<ThreadMessage[]>([]);
+  const [dashboardFoldersError, setDashboardFoldersError] = useState('');
   const [threadError, setThreadError] = useState('');
-  const [navigationCollapsed, setNavigationCollapsed] = useState(
-    () => readWorkspacePreference('orbit-navigation-collapsed', 'false') === 'true',
+  const [workspaceView, setWorkspaceView] = useState<'dashboard' | 'chats' | 'activity' | 'details'>('dashboard');
+  const [shareFolderAfterOpen, setShareFolderAfterOpen] = useState(false);
+  const [openFolderComposerRequest, setOpenFolderComposerRequest] = useState(false);
+  const [compactDensity, setCompactDensity] = useState(
+    () => readWorkspacePreference('orbit-density', 'compact') !== 'comfortable',
   );
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [actionLabelMode, setActionLabelMode] = useState<'auto' | 'icons'>(
+    () => {
+      const saved = readWorkspacePreference('orbit-action-label-mode', 'auto');
+      return saved === 'icons' ? saved : 'auto';
+    },
+  );
+  const detailsOpen = workspaceView === 'details';
   const [workspaceAppearance, setWorkspaceAppearance] = useState<WorkspaceAppearance>(
     () => {
       const saved = readWorkspacePreference('orbit-appearance', '');
@@ -348,8 +362,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     '--orbit-sidebar-width' | '--orbit-details-width',
     string
   > = {
-    '--orbit-sidebar-width': `${navigationCollapsed ? 72 : 270}px`,
-    '--orbit-details-width': `${selectedId && detailsOpen ? 310 : 0}px`,
+    '--orbit-sidebar-width': '300px',
+    '--orbit-details-width': '0px',
   };
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -395,6 +409,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const peerPublicKeysRef = useRef(new Map<string, Promise<string>>());
   const peerPublicKeyHistoryRef = useRef(new Map<string, Promise<Awaited<ReturnType<typeof getUserPublicKeys>>>>());
   const availabilitySinceRef = useRef(new Map<string, { state: string; downloads: boolean; since: number }>());
+  const availabilityFailuresRef = useRef(new Set<string>());
   const lastPresenceActivityRef = useRef(Date.now());
   const idleSentRef = useRef<boolean | null>(null);
   const fileTransfersRef = useRef(new Map<string, PeerFileTransfer>());
@@ -464,6 +479,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   ): void {
     if (!selected) return;
     setAccessRequestNote('');
+    setAccessRequestError('');
     setAccessRequestDialog({ shareId, conversationId: selected.id, kind });
   }
 
@@ -473,15 +489,16 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     const conversation = selected;
     if (!request || !conversation || conversation.id !== request.conversationId || accessRequestSending) return;
     if (!deviceIdentity) {
-      setActionError('Your encryption key is not ready yet.');
+      setAccessRequestError('Your encryption key is not ready yet. Wait for it to finish loading, then try again.');
       return;
     }
     const note = accessRequestNote.trim();
     if (note.length > 280) {
-      setActionError('Access request notes must be 280 characters or fewer.');
+      setAccessRequestError('Access request notes must be 280 characters or fewer.');
       return;
     }
     setAccessRequestSending(true);
+    setAccessRequestError('');
     try {
       const requestId = crypto.randomUUID();
       const encryptedNote = note
@@ -496,9 +513,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           : {}),
       });
       setAccessRequestDialog(null);
-      setNotice('Access request sent. Your contact will see it when they are online.');
+      setNotice('Request saved. Your contact will see it when connected.');
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Could not send the access request.');
+      setAccessRequestError(error instanceof Error ? error.message : 'Could not send the access request.');
     } finally {
       setAccessRequestSending(false);
     }
@@ -514,15 +531,21 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           next.delete(shareId);
           return next;
         });
+        setNotice('This device will no longer notify you about this folder.');
         return;
       }
       const currentAvailability = presenceState.availability[shareId];
+      if (currentAvailability?.state === 'available') {
+        setNotice('This folder is already available.');
+        return;
+      }
       await watchShare(
         shareId,
         selected.id,
-        currentAvailability?.state === 'available' ? currentAvailability.since : 0,
+        currentAvailability?.since ?? 0,
       );
       setWatchedShareIds((current) => new Set(current).add(shareId));
+      setNotice('This device will notify you when the folder becomes available.');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Availability notification could not be changed.');
     }
@@ -755,8 +778,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     for (const [key, value] of [
-      ['orbit-navigation-collapsed', String(navigationCollapsed)],
       ['orbit-appearance', workspaceAppearance],
+      ['orbit-density', compactDensity ? 'compact' : 'comfortable'],
+      ['orbit-action-label-mode', actionLabelMode],
     ]) {
       try {
         localStorage.setItem(key, value);
@@ -765,16 +789,27 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         break;
       }
     }
-  }, [navigationCollapsed, workspaceAppearance]);
+  }, [actionLabelMode, compactDensity, workspaceAppearance]);
 
   useEffect(() => {
     if (!detailsOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDetailsOpen(false);
+      if (event.key === 'Escape') setWorkspaceView('chats');
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [detailsOpen]);
+
+  useEffect(() => {
+    const openSearchShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setDialog('search');
+      }
+    };
+    window.addEventListener('keydown', openSearchShortcut);
+    return () => window.removeEventListener('keydown', openSearchShortcut);
+  }, []);
 
   const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
@@ -826,10 +861,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   function selectConversation(conversationId: string) {
+    setWorkspaceView('chats');
     setSelectedId(conversationId);
     setConversations((current) => current.map((item) =>
       item.id === conversationId ? { ...item, unreadCount: 0 } : item,
     ));
+    if (shareFolderAfterOpen) {
+      setShareFolderAfterOpen(false);
+      setOpenFolderComposerRequest(true);
+    }
   }
 
   useEffect(() => {
@@ -949,6 +989,36 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         // Reconnect starts a new heartbeat and applies a replacement snapshot.
       }
     };
+    const unsubscribeAvailabilityAcks = subscribeOrbitEvents((envelope) => {
+      if ((envelope.event !== 'share.availability.ack' && envelope.event !== 'share.viewing.ack') ||
+        !envelope.data || typeof envelope.data !== 'object') return;
+      const event = envelope.data as {
+        id?: string;
+        payload?: { accepted?: boolean; code?: string; message?: string };
+      };
+      if (envelope.event === 'share.viewing.ack') {
+        if (event.payload?.accepted === false && event.payload.code === 'DATABASE_UNAVAILABLE') {
+          setActionError('The server cannot reach its database, so folder activity and download availability cannot be updated.');
+        }
+        return;
+      }
+      if (!event.id || event.payload?.accepted !== false) {
+        if (event.id) availabilityFailuresRef.current.delete(event.id);
+        return;
+      }
+      if (availabilityFailuresRef.current.has(event.id)) return;
+      availabilityFailuresRef.current.add(event.id);
+      setLocalAvailability((current) => {
+        const next = { ...current };
+        delete next[event.id!];
+        return next;
+      });
+      setActionError(event.payload.code === 'DATABASE_UNAVAILABLE'
+        ? 'The server cannot reach its database, so folder availability could not be published. Preview and download requests will remain unavailable until the database reconnects.'
+        : event.payload.code === 'RATE_LIMITED'
+          ? 'Folder status updates were rate-limited. They will retry automatically.'
+          : event.payload.message ?? 'Folder availability could not be published to your contact. Check the connection and try again.');
+    });
     void getPresenceSnapshot().then((snapshot) => {
       if (active) replacePresenceSnapshot(snapshot);
     }).catch((error: unknown) => {
@@ -979,6 +1049,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     document.addEventListener('visibilitychange', checkAvailability);
     return () => {
       active = false;
+      unsubscribeAvailabilityAcks();
       window.clearInterval(heartbeat);
       window.clearInterval(idleCheck);
       window.clearInterval(availabilityTimer);
@@ -1029,6 +1100,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }, [notice]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
+
   const peerBlocked = Boolean(selected && blockedUsers.some(({ id }) => id === selected.peer.id));
   const sendPreviewSignal = useCallback((signal: PreviewSignal) => {
     sendOrbitEvent('preview.signal', signal);
@@ -1128,6 +1200,70 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         : "Couldn't decrypt with the saved keys. Ask the owner to reshare after checking both accounts' encryption keys.",
     );
   }, [user.id]);
+
+  useEffect(() => {
+    let active = true;
+    setDashboardFoldersError('');
+    if (!deviceIdentity || conversations.length === 0) {
+      setDashboardFolderMessages([]);
+      setDashboardFoldersError('');
+      return () => { active = false; };
+    }
+
+    void Promise.all(conversations.map(async (conversation) => {
+      try {
+        const records = await listSharedFolders(conversation.id);
+        return await Promise.all(records.map(async (record): Promise<ThreadMessage> => {
+          const base = sharedFolderTimelineMessage(
+            record,
+            user.id,
+            conversation.peer.displayName,
+          );
+          if (!conversation.peer.keyAvailable) return base;
+          try {
+            const decrypted = await decryptFolderWithAvailableKeyVersions(
+              deviceIdentity,
+              conversation,
+              record,
+            );
+            const files = decrypted.manifest.entries.filter(({ k }) => k === 'f');
+            return {
+              ...base,
+              sharedFolder: {
+                ...record,
+                status: 'ready',
+                manifest: decrypted.manifest,
+                invalidCount: decrypted.invalidCount,
+                fileCount: files.length,
+                folderCount: decrypted.manifest.entries.filter(({ k }) => k === 'd').length,
+                totalSize: files.reduce((total, entry) => total + (entry.s ?? 0), 0),
+              },
+            };
+          } catch (error) {
+            return {
+              ...base,
+              sharedFolder: {
+                ...record,
+                status: 'error',
+                errorMessage: error instanceof Error
+                  ? error.message
+                  : "This folder couldn't be decrypted on this device.",
+              },
+            };
+          }
+        }));
+      } catch {
+        if (active) setDashboardFoldersError('Some shared folders could not be loaded.');
+        return [];
+      }
+    })).then((groups) => {
+      if (!active) return;
+      setDashboardFolderMessages(groups.flat().sort((left, right) =>
+        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+      ));
+    });
+    return () => { active = false; };
+  }, [conversations, decryptFolderWithAvailableKeyVersions, deviceIdentity, user.id]);
 
   const decryptWithAvailableKeyVersions = useCallback(async (
     identity: DeviceIdentity,
@@ -1567,11 +1703,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         for (const item of folderMessages) merged.set(item.id, item);
         for (const item of current) {
           if (
-            item.conversationId === conversation.id &&
-            item.sharedFolder?.status === 'revoked' &&
-            !folderMessages.some((folder) => folder.sharedFolder?.id === item.sharedFolder?.id)
-          ) merged.set(item.id, item);
-          if (
             !includeSharedFolders &&
             item.conversationId === conversation.id &&
             item.kind === 'shared_folder'
@@ -1761,10 +1892,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
             delete next[payload.id!];
             return next;
           });
-          setThreadMessages((current) => current.map((item) =>
-            item.sharedFolder && item.sharedFolder.id === payload.id
-              ? { ...item, sharedFolder: { ...item.sharedFolder, status: 'revoked' } }
-              : item,
+          setThreadMessages((current) => current.filter((item) =>
+            item.sharedFolder?.id !== payload.id,
           ));
         }
         if (payload?.conversationId === selectedId) void refreshThread(true);
@@ -1817,7 +1946,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           previewSessionManagerRef.current?.peerUnavailable(
             event.payload.shareId,
             event.payload.sessionId,
-            event.payload.reason === 'needs_permission' || event.payload.reason === 'needs_reselect'
+            event.payload.reason === 'needs_permission' || event.payload.reason === 'needs_reselect' ||
+              event.payload.reason === 'server_unavailable'
               ? event.payload.reason
               : 'offline',
           );
@@ -2238,7 +2368,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     )
     const encrypted = await encryptFolderManifest(manifest, key, conversation.id, shareId)
     try {
-      if (picked.handle) await saveFolderHandle(shareId, picked.handle)
+      if (picked.handle) {
+        await saveFolderHandle(shareId, picked.handle as unknown as FileSystemDirectoryHandle)
+      }
       await saveFolderSelection(shareId, {
         excludedDirectories: picked.excludedDirectories ?? [],
         includeHidden: picked.includeHidden ?? false,
@@ -2377,20 +2509,23 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   async function stopSharingFolder(id: string): Promise<void> {
+    const revokedMessage = threadMessages.find((item) => item.sharedFolder?.id === id);
+    setThreadMessages((current) => current.filter((item) => item.sharedFolder?.id !== id));
     try {
       await revokeSharedFolder(id)
       previewServerRef.current?.closeShare(id);
       previewSessionManagerRef.current?.closeShare(id);
       previewOwnerSharesRef.current.delete(id);
       setPreviewOwnerNotice((current) => current?.shareId === id ? null : current);
-      setThreadMessages((current) => current.map((item) =>
-        item.sharedFolder && item.sharedFolder.id === id
-          ? { ...item, sharedFolder: { ...item.sharedFolder, status: 'revoked' } }
-          : item,
-      ))
       setNotice('Folder sharing stopped.')
-      await refreshThread(true)
     } catch (error) {
+      if (revokedMessage) {
+        setThreadMessages((current) => current.some((item) => item.id === revokedMessage.id)
+          ? current
+          : [...current, revokedMessage].sort((left, right) =>
+              new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+            ));
+      }
       setThreadError(error instanceof Error ? error.message : 'Could not stop sharing this folder.')
     }
   }
@@ -2582,35 +2717,58 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   }
 
   return <main
-    className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}${navigationCollapsed ? ' is-navigation-collapsed' : ''}`}
+    className={`home-screen orbit-shell${selected ? ' has-selected-conversation' : ''}${conversations.length ? ' has-conversations' : ''}`}
     data-theme={workspaceAppearance === 'midnight' ? 'dark' : 'light'}
     data-appearance={workspaceAppearance}
+    data-view={workspaceView}
+    data-density={compactDensity ? 'compact' : 'comfortable'}
+    data-label-mode={actionLabelMode}
     style={workspaceLayoutStyle}
   >
+    <a className="orbit-skip-link" href="#orbit-main-content">Skip to content</a>
+    <IncomingAccessRequests
+      connection={connection}
+      conversations={conversations}
+      identity={deviceIdentity}
+      onOpenConversation={selectConversation}
+    />
     {accessRequestDialog && selected?.id === accessRequestDialog.conversationId && <div className="orbit-folder-backdrop" role="presentation">
       <section className="orbit-folder-dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-access-request-title">
-        <h2 id="orbit-access-request-title">
-          {accessRequestDialog.kind === 'download_permission'
-            ? 'Ask for download permission'
-            : accessRequestDialog.kind === 'reshare'
-              ? `Ask ${selected.peer.displayName} to share again`
-              : `Ask ${selected.peer.displayName} to open the folder`}
-        </h2>
+        <header className="orbit-access-request-heading">
+          <span className="orbit-avatar">{initials(selected.peer.displayName)}</span>
+          <div>
+            <p className="orbit-dashboard-kicker">FOLDER ACCESS</p>
+            <h2 id="orbit-access-request-title">
+              {accessRequestDialog.kind === 'download_permission'
+                ? 'Ask for download access'
+                : accessRequestDialog.kind === 'reshare'
+                  ? `Ask ${selected.peer.displayName} to share again`
+                  : `Ask ${selected.peer.displayName} to open the folder`}
+            </h2>
+          </div>
+        </header>
         <form onSubmit={(event) => void sendAccessRequest(event)}>
-          <label htmlFor="orbit-access-request-note">Optional note (up to 280 characters)</label>
+          <label className="orbit-access-request-label" htmlFor="orbit-access-request-note">
+            <span>Note <small>optional</small></span>
+            <small>{accessRequestNote.length}/280</small>
+          </label>
           <textarea
             id="orbit-access-request-note"
             value={accessRequestNote}
             maxLength={280}
             onChange={(event) => setAccessRequestNote(event.target.value)}
-            placeholder="Add a short note"
+            placeholder="Write a short message…"
           />
-          <p>This note is encrypted on your device. Orbit's server cannot read it.</p>
+          <p className="orbit-access-request-private"><OrbitIcon name="lock" size={13} /> Private, end-to-end encrypted</p>
+          {accessRequestError && <p className="orbit-request-form-error" role="alert">{accessRequestError}</p>}
           <div className="orbit-shared-folder-actions">
             <button type="submit" disabled={accessRequestSending || !deviceIdentity}>
               {accessRequestSending ? 'Sending…' : 'Send request'}
             </button>
-            <button type="button" onClick={() => setAccessRequestDialog(null)} disabled={accessRequestSending}>
+            <button type="button" onClick={() => {
+              setAccessRequestDialog(null);
+              setAccessRequestError('');
+            }} disabled={accessRequestSending}>
               Cancel
             </button>
           </div>
@@ -2652,8 +2810,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         {previewServerRef.current?.isPaused(previewOwnerNotice.shareId) ? 'Resume sharing' : 'Pause sharing'}
       </button>}
     </aside>}
-    <DownloadsPanel />
     <ConversationSidebar
+      workspaceView={workspaceView}
       user={user}
       busy={busy}
       conversations={conversations}
@@ -2664,9 +2822,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       error={conversationError}
       connection={connection}
       connectionError={connectionError}
-      collapsed={navigationCollapsed}
+      onChangeWorkspaceView={(view) => {
+        setWorkspaceView(view);
+        if (view === 'chats') setSelectedId(null);
+      }}
       onSelect={selectConversation}
-      onToggleCollapsed={() => setNavigationCollapsed((collapsed) => !collapsed)}
       onRetryConversations={() => void loadConversations()}
       onRetryConnection={retryOrbitSocket}
       onFindSomeone={() => setDialog('search')}
@@ -2684,10 +2844,62 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       onSignOut={leaveSession}
     />
 
-    <section className="orbit-main" aria-label={selected ? `Conversation with ${selected.peer.displayName}` : 'No conversations'}>
-      {!selected && conversations.length === 0 && !loadingConversations && <EmptyConversationState onFindSomeone={() => setDialog('search')} />}
+    <section className="orbit-main" id="orbit-main-content" aria-label={workspaceView === 'dashboard' ? 'Dashboard' : workspaceView === 'activity' ? 'Downloads' : workspaceView === 'details' ? 'Conversation details' : selected ? `Conversation with ${selected.peer.displayName}` : 'People'}>
+      <nav className="orbit-workspace-nav" aria-label="Workspace pages">
+        <button type="button" className={workspaceView === 'dashboard' ? 'is-active' : ''} aria-current={workspaceView === 'dashboard' ? 'page' : undefined} onClick={() => setWorkspaceView('dashboard')}>
+          <OrbitIcon name="grid" size={16} /><span>Home</span>
+        </button>
+        <button type="button" className={workspaceView === 'chats' || workspaceView === 'details' ? 'is-active' : ''} aria-current={workspaceView === 'chats' || workspaceView === 'details' ? 'page' : undefined} onClick={() => {
+          setWorkspaceView('chats');
+          setSelectedId(null);
+        }}>
+          <OrbitIcon name="chat" size={16} /><span>People</span>
+          {conversations.some(({ unreadCount }) => unreadCount > 0) && <i aria-label={`${conversations.reduce((total, item) => total + item.unreadCount, 0)} unread messages`} />}
+        </button>
+        <button type="button" className={workspaceView === 'activity' ? 'is-active' : ''} aria-current={workspaceView === 'activity' ? 'page' : undefined} onClick={() => setWorkspaceView('activity')}>
+          <OrbitIcon name="list" size={16} /><span>Downloads</span>
+        </button>
+        <button type="button" className="orbit-workspace-nav-settings" onClick={() => setDialog('settings')}>
+          <OrbitIcon name="settings" size={16} /><span>Settings</span>
+        </button>
+      </nav>
+      {workspaceView === 'activity' && <DownloadsPage />}
 
-      {selected && <ConversationThread
+      {workspaceView === 'dashboard' && <Dashboard
+        userId={user.id}
+        conversations={conversations}
+        previews={conversationPreviews}
+        sharedMessages={dashboardFolderMessages}
+        sharedFoldersError={dashboardFoldersError}
+        presenceByUser={presenceState.presence}
+        availabilityByShare={{ ...presenceState.availability, ...localAvailability }}
+        deviceIdentityAvailable={Boolean(deviceIdentity)}
+        compactDensity={compactDensity}
+        connectionLabel={connection === 'connected' ? 'Connected' : connection === 'reconnecting' ? 'Reconnecting' : connection === 'auth_failed' ? 'Session expired' : connection === 'connecting' ? 'Connecting' : 'Offline'}
+        onOpenConversation={selectConversation}
+        onFindSomeone={() => setDialog('search')}
+        onShareFolder={() => {
+          if (selected) {
+            setWorkspaceView('chats');
+            setOpenFolderComposerRequest(true);
+          } else {
+            setShareFolderAfterOpen(true);
+            setDialog('search');
+          }
+        }}
+        onOpenActivity={() => setWorkspaceView('activity')}
+      />}
+      {workspaceView === 'chats' && !selected && <PeoplePage
+        conversations={conversations}
+        previews={conversationPreviews}
+        presenceByUser={presenceState.presence}
+        loading={loadingConversations}
+        error={conversationError}
+        onOpenConversation={selectConversation}
+        onFindSomeone={() => setDialog('search')}
+        onRetry={() => void loadConversations()}
+      />}
+      {workspaceView === 'chats' && selected && <ConversationThread
         conversation={selected}
         user={user}
         peerPresenceStatus={presenceState.presence[selected.peer.id] ?? 'offline'}
@@ -2712,6 +2924,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         hasOlderMessages={hasOlderMessages}
         loadingOlderMessages={loadingOlderMessages}
         detailsOpen={detailsOpen}
+        openFolderComposerRequest={openFolderComposerRequest}
+        onFolderComposerRequestHandled={() => setOpenFolderComposerRequest(false)}
         audioCall={audioCall}
         remoteAudioStream={remoteAudioStream}
         audioCallDisabled={Boolean(audioCall) || !deviceIdentity || !selected.peer.keyAvailable || peerBlocked || connection !== 'connected'}
@@ -2720,9 +2934,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           : 'Start audio call'}
         deviceIdentity={deviceIdentity}
         previewSessionManager={previewSessionManagerRef.current!}
-        onBack={() => setSelectedId(null)}
-        onToggleNavigation={() => setNavigationCollapsed((collapsed) => !collapsed)}
-        onToggleDetails={() => setDetailsOpen((open) => !open)}
+        onBack={() => { setSelectedId(null); setWorkspaceView('chats'); }}
+        onToggleDetails={() => setWorkspaceView('details')}
         onRefreshPeerKey={() => void refreshPeerKey()}
         refreshingPeerKey={refreshingPeerKey}
         onStartAudioCall={() => void startAudioCall()}
@@ -2760,32 +2973,26 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         onRetryAllQueued={retryAllQueuedMessages}
         onSendMessage={(event) => void sendTextMessage(event)}
       />}
-      {message && <p className="form-message home-message" role="alert">{message}</p>}
-      {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
-    </section>
-
-    {selected && detailsOpen && <>
-      <button
-        className="orbit-details-backdrop"
-        type="button"
-        aria-label="Close conversation details"
-        onClick={() => setDetailsOpen(false)}
-      />
-      <WorkspaceDetails
+      {workspaceView === 'details' && selected && <WorkspaceDetails
         conversation={selected}
         user={user}
         messages={threadMessages}
         appearance={workspaceAppearance}
         onAppearanceChange={setWorkspaceAppearance}
-        onClose={() => setDetailsOpen(false)}
+        onClose={() => setWorkspaceView('chats')}
         onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
         onJumpToMessage={(id) => {
-          const target = document.getElementById(`orbit-message-${id}`);
-          target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target?.focus({ preventScroll: true });
+          setWorkspaceView('chats');
+          window.setTimeout(() => {
+            const target = document.getElementById(`orbit-message-${id}`);
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.focus({ preventScroll: true });
+          }, 0);
         }}
-      />
-    </>}
+      />}
+      {message && <p className="form-message home-message" role="alert">{message}</p>}
+      {actionError && <p className="orbit-action-error" role="alert">{actionError}</p>}
+    </section>
 
     {notice && <div className="orbit-toast" role="status">{notice}</div>}
 
@@ -2805,10 +3012,14 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       privacySettingsBusy={privacySettingsBusy}
       browserNotifications={browserNotifications}
       includeFolderNames={includeFolderNames}
-      searchIndexEnabled={searchIndexEnabled}
+      compactDensity={compactDensity}
+      actionLabelMode={actionLabelMode}
       onQueryChange={setQuery}
       onOpenConversation={(person) => void openConversation(person)}
-      onClose={() => setDialog(null)}
+      onClose={() => {
+        setDialog(null);
+        setShareFolderAfterOpen(false);
+      }}
       onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
       onRefreshBlocks={() => void refreshBlockedUsers()}
       onUnblock={(id) => void unblockContact(id)}
@@ -2816,6 +3027,22 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       onEnableBrowserNotifications={(enabled) => void handleBrowserNotifications(enabled)}
       onIncludeFolderNamesChange={(enabled) =>
         setLocalPreference('orbit-notification-folder-names', enabled, setIncludeFolderNames)}
+      onDensityChange={(compact) => {
+        try {
+          localStorage.setItem('orbit-density', compact ? 'compact' : 'comfortable');
+          setCompactDensity(compact);
+        } catch {
+          setActionError('This browser could not save the display density preference.');
+        }
+      }}
+      onActionLabelModeChange={(mode) => {
+        try {
+          localStorage.setItem('orbit-action-label-mode', mode);
+          setActionLabelMode(mode);
+        } catch {
+          setActionError('This browser could not save the action label preference.');
+        }
+      }}
       onSignOut={leaveSession}
     />
   </main>;

@@ -60,6 +60,10 @@ export class AccessRequestsController {
   decline(request: AuthRequest, id: string) {
     return this.requests.decline(z.string().uuid().parse(id), request.userId)
   }
+
+  fulfill(request: AuthRequest, id: string) {
+    return this.requests.fulfill(z.string().uuid().parse(id), request.userId)
+  }
 }
 
 const prototype = AccessRequestsController.prototype
@@ -100,3 +104,11 @@ Post("v1/access-requests/:id/decline")(
 )
 Req()(prototype, "decline", 0)
 Param("id")(prototype, "decline", 1)
+
+Post("v1/access-requests/:id/fulfill")(
+  prototype,
+  "fulfill",
+  Object.getOwnPropertyDescriptor(prototype, "fulfill")!,
+)
+Req()(prototype, "fulfill", 0)
+Param("id")(prototype, "fulfill", 1)

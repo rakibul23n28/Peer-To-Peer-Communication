@@ -407,11 +407,13 @@ export class PreviewSession {
     this.dispose("closed")
   }
 
-  failFromPeer(reason: "offline" | "needs_permission" | "needs_reselect" = "offline"): void {
+  failFromPeer(reason: "offline" | "needs_permission" | "needs_reselect" | "server_unavailable" = "offline"): void {
     const message = reason === "needs_permission"
       ? "The folder owner needs to re-allow access before previews can start."
       : reason === "needs_reselect"
         ? "The folder owner needs to select the shared folder again before previews can start."
+        : reason === "server_unavailable"
+          ? "Orbit could not verify the shared folder because its database is unavailable. Preview and download requests cannot continue until the server reconnects."
         : "The folder owner is not online right now. Try again when they are back."
     this.fail(new Error(message))
   }
@@ -803,7 +805,7 @@ export class PreviewSessionManager {
   peerUnavailable(
     shareId: string,
     sessionId: string,
-    reason: "offline" | "needs_permission" | "needs_reselect" = "offline",
+    reason: "offline" | "needs_permission" | "needs_reselect" | "server_unavailable" = "offline",
   ): void {
     const session = this.sessions.get(shareId)
     if (session?.sessionId === sessionId) session.failFromPeer(reason)

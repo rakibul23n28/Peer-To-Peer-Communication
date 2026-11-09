@@ -217,11 +217,15 @@ export class AccessRequestsRepository {
     return this.resolve(id, ownerId, "ownerId", "declined")
   }
 
+  async fulfill(id: string, ownerId: string) {
+    return this.resolve(id, ownerId, "ownerId", "fulfilled")
+  }
+
   private async resolve(
     id: string,
     userId: string,
     field: "requesterId" | "ownerId",
-    status: "canceled" | "declined",
+    status: "canceled" | "declined" | "fulfilled",
   ) {
     const request = await this.prisma.accessRequest.findFirst({
       where: { id, [field]: userId, status: "pending", expiresAt: { gt: new Date() } },
@@ -247,3 +251,5 @@ export class AccessRequestsRepository {
     return this.prisma.accessRequest.findUniqueOrThrow({ where: { id } })
   }
 }
+
+Inject(PrismaService)(AccessRequestsRepository, undefined, 0)

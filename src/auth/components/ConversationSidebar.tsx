@@ -7,6 +7,7 @@ import { PresenceIndicator } from './PresenceIndicator';
 import type { ClientPresenceStatus } from '../presenceStore';
 
 interface ConversationSidebarProps {
+  workspaceView: 'dashboard' | 'chats' | 'activity' | 'details';
   user: UserIdentity;
   busy: boolean;
   conversations: ConversationSummary[];
@@ -17,9 +18,8 @@ interface ConversationSidebarProps {
   error: string;
   connection: OrbitConnectionState;
   connectionError: string;
-  collapsed: boolean;
+  onChangeWorkspaceView: (view: 'dashboard' | 'chats' | 'activity') => void;
   onSelect: (id: string) => void;
-  onToggleCollapsed: () => void;
   onRetryConversations: () => void;
   onRetryConnection: () => void;
   onFindSomeone: () => void;
@@ -44,6 +44,7 @@ function messageTime(value: string | null): string {
 }
 
 export function ConversationSidebar({
+  workspaceView,
   user,
   busy,
   conversations,
@@ -54,9 +55,8 @@ export function ConversationSidebar({
   error,
   connection,
   connectionError,
-  collapsed,
+  onChangeWorkspaceView,
   onSelect,
-  onToggleCollapsed,
   onRetryConversations,
   onRetryConnection,
   onFindSomeone,
@@ -68,21 +68,17 @@ export function ConversationSidebar({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const hasConnectionIssue = connection === 'offline' || connection === 'reconnecting' || connection === 'auth_failed';
+  const onlineConversations = conversations.filter(({ peer }) => presenceByUser[peer.id] === 'online');
 
-  return <aside className="orbit-sidebar" aria-label="Orbit navigation">
+  return <aside className="orbit-sidebar" aria-label="People and conversations">
     <a className="home-brand" href="/" aria-label="Orbit home"><OrbitMark /> orbit<span>.</span></a>
-    <button
-      className="orbit-sidebar-toggle"
-      type="button"
-      onClick={onToggleCollapsed}
-      aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-      aria-pressed={collapsed}
-      title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-    >
-      <OrbitIcon name={collapsed ? 'expand' : 'collapse'} size={17} />
-    </button>
+    <nav className="orbit-sidebar-workspace-nav" aria-label="Workspace pages">
+      <button type="button" className={workspaceView === 'dashboard' ? 'is-active' : ''} aria-current={workspaceView === 'dashboard' ? 'page' : undefined} onClick={() => onChangeWorkspaceView('dashboard')}><OrbitIcon name="grid" size={16} /><span>Home</span></button>
+      <button type="button" className={workspaceView === 'chats' || workspaceView === 'details' ? 'is-active' : ''} aria-current={workspaceView === 'chats' || workspaceView === 'details' ? 'page' : undefined} onClick={() => onChangeWorkspaceView('chats')}><OrbitIcon name="chat" size={16} /><span>People</span></button>
+      <button type="button" className={workspaceView === 'activity' ? 'is-active' : ''} aria-current={workspaceView === 'activity' ? 'page' : undefined} onClick={() => onChangeWorkspaceView('activity')}><OrbitIcon name="list" size={16} /><span>Downloads</span></button>
+    </nav>
     <div className="orbit-sidebar-heading">
-      <span className="orbit-list-title">Conversations</span>
+      <span className="orbit-list-title">Your people</span>
       <div className="orbit-add-wrap">
         <button className="orbit-add" type="button" aria-label="New conversation or send a file" aria-haspopup="true" aria-expanded={addMenuOpen} aria-controls="orbit-add-menu" onClick={() => setAddMenuOpen((open) => !open)}><OrbitIcon name="plus" size={17} /></button>
         {addMenuOpen && <div className="orbit-popover" id="orbit-add-menu">
@@ -91,6 +87,19 @@ export function ConversationSidebar({
         </div>}
       </div>
     </div>
+    {onlineConversations.length > 0 && <div className="orbit-people-online" aria-label="Online contacts">
+      {onlineConversations.slice(0, 8).map(({ id, peer }) => <button
+        type="button"
+        key={id}
+        aria-label={`Open chat with ${peer.displayName}, online`}
+        title={`${peer.displayName} · online`}
+        onClick={() => onSelect(id)}
+      >
+        <span className="orbit-avatar">{initials(peer.displayName)}<PresenceIndicator status="online" compact /></span>
+      </button>)}
+      {onlineConversations.length > 8 && <span className="orbit-people-overflow">+{onlineConversations.length - 8}</span>}
+    </div>}
+    <p className="orbit-people-section-label">Recent conversations</p>
     <div className="orbit-conversation-list">
       {loading && <p className="orbit-list-note">Loading conversations…</p>}
       {error && <div className="orbit-inline-error" role="alert"><span>{error}</span><button type="button" onClick={onRetryConversations}>Retry</button></div>}
@@ -126,7 +135,7 @@ export function ConversationSidebar({
         <span className="orbit-account-version"><OrbitIcon name="shield" size={14} />Device key · version {user.keyVersion}</span>
         <code className="orbit-account-fingerprint">{user.fingerprint}</code>
         <button type="button" onClick={onCopyFingerprint}><OrbitIcon name="copy" size={15} />Copy device fingerprint</button>
-        <button type="button" onClick={() => { onOpenSettings(); setAccountMenuOpen(false); }}><OrbitIcon name="settings" size={15} />Settings</button>
+        <button type="button" onClick={() => { onOpenSettings(); setAccountMenuOpen(false); }}>Settings</button>
         <button type="button" disabled={busy} onClick={onSignOut}><OrbitIcon name="logout" size={15} />Sign out</button>
       </div>}
     </div>

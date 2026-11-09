@@ -515,7 +515,7 @@ export function createAccessRequest(
 
 export function resolveAccessRequest(
   id: string,
-  action: "cancel" | "decline",
+  action: "cancel" | "decline" | "fulfill",
 ): Promise<AccessRequestRecord> {
   return apiRequest(`/access-requests/${encodeURIComponent(id)}/${action}`, {
     method: "POST",

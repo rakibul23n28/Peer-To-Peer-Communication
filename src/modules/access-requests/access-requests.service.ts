@@ -37,6 +37,12 @@ export class AccessRequestsService {
     return serializeAccessRequest(request)
   }
 
+  async fulfill(id: string, ownerId: string) {
+    const request = await this.repository.fulfill(id, ownerId)
+    this.publish(request, "access_request.updated")
+    return serializeAccessRequest(request)
+  }
+
   private publish(request: {
     id: string
     conversationId: string

@@ -1,11 +1,13 @@
 import { DOWNLOAD_LIMITS } from "../../shared/downloadProtocol"
 import {
+  allocateUniquePath,
   blockLength,
   createDownloadRootHash,
   hasBitmapBit,
   makeBitmap,
   planDownloadBlocks,
   reduceDownloadState,
+  sanitizePathSegment,
   setBitmapBit,
   sha256,
   type DownloadEvent,
@@ -19,6 +21,11 @@ import {
   type DownloadRecord,
 } from "./downloadJournal"
 import type { PreviewFileInfo, PreviewSession } from "./previewSession"
+import {
+  buildSharedFolderTree,
+  type SharedFolderManifest,
+  type SharedFolderTreeNode,
+} from "../../shared/sharedFolders"
 import { FsaSink } from "./sinks/FsaSink"
 import { MemorySink } from "./sinks/MemorySink"
 import { OpfsSink } from "./sinks/OpfsSink"
@@ -38,6 +45,7 @@ export interface DownloadEngineOptions {
   localName: string
   sink: StorageSink
   fileHandle?: FileSystemFileHandle
+  jobId?: string
   onProgress: (progress: DownloadProgress, id: string) => void
 }
 
@@ -56,6 +64,10 @@ export class DownloadEngine {
   constructor(private readonly options: DownloadEngineOptions) {
     const plan = planDownloadBlocks(options.info.size)
     this.blockHashes = new Uint8Array(plan.totalBlocks * 32)
+  }
+
+  get currentState(): DownloadState {
+    return this.state
   }
 
   start(): Promise<void> {
@@ -95,6 +107,7 @@ export class DownloadEngine {
     const timestamp = Date.now()
     const record: DownloadRecord = {
       id: this.id,
+      jobId: this.options.jobId,
       shareId: info.shareId,
       conversationId: info.conversation.id,
       entry: info.entryId,
@@ -369,6 +382,104 @@ export async function startFileDownload(
   onCreated?.(engine)
   void engine.start()
   return engine
+}
+
+export async function startFolderDownload(input: {
+  session: PreviewSession
+  info: Omit<PreviewFileInfo, "entryId" | "path" | "size" | "mtime">
+  manifest: SharedFolderManifest
+  onProgress: (completedFiles: number, totalFiles: number, currentPath: string) => void
+  onFileProgress: (progress: DownloadProgress, id: string) => void
+  onCreated: (engine: DownloadEngine, path: string) => void
+}): Promise<void> {
+  const pickerWindow = window as Window & {
+    showDirectoryPicker?: (options?: { mode?: "readwrite" }) => Promise<FileSystemDirectoryHandle>
+  }
+  if (!pickerWindow.showDirectoryPicker) {
+    throw new Error("Full-folder downloads need a browser that can save to a chosen folder. You can still download files one at a time.")
+  }
+
+  const destination = await pickerWindow.showDirectoryPicker({ mode: "readwrite" })
+  const rootName = sanitizePathSegment(input.manifest.rootName, 0)
+  let root: FileSystemDirectoryHandle | undefined
+  for (let suffix = 0; !root; suffix += 1) {
+    const candidate = suffix === 0 ? rootName : `${rootName} (${suffix})`
+    try {
+      await destination.getDirectoryHandle(candidate)
+      continue
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error
+    }
+    root = await destination.getDirectoryHandle(candidate, { create: true })
+  }
+  const directories = new Map<string, FileSystemDirectoryHandle>([["", root]])
+  const usedPaths = new Set<string>()
+  const tree = buildSharedFolderTree(input.manifest.entries)
+  const entriesById = new Map(input.manifest.entries.map((entry) => [entry.id, entry]))
+  const resolvedEntries: Array<{ node: SharedFolderTreeNode; segments: string[] }> = []
+  const visit = (parent: SharedFolderTreeNode, parentSegments: string[]) => {
+    for (const node of parent.children.values()) {
+      const safeName = sanitizePathSegment(node.name, node.entryId ?? resolvedEntries.length)
+      const segments = allocateUniquePath([...parentSegments, safeName], usedPaths)
+      resolvedEntries.push({ node, segments })
+      if (node.kind === "d") visit(node, segments)
+    }
+  }
+  visit(tree, [])
+
+  const ensureDirectory = async (segments: string[]): Promise<FileSystemDirectoryHandle> => {
+    let current = root
+    let currentPath = ""
+    for (const segment of segments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment
+      const cached = directories.get(currentPath)
+      if (cached) {
+        current = cached
+        continue
+      }
+      current = await current.getDirectoryHandle(segment, { create: true })
+      directories.set(currentPath, current)
+    }
+    return current
+  }
+
+  const resolvedFiles = resolvedEntries.filter(({ node }) => node.kind === "f")
+  for (const { node, segments } of resolvedEntries) {
+    if (node.kind === "d") await ensureDirectory(segments)
+  }
+
+  for (let index = 0; index < resolvedFiles.length; index += 1) {
+    const { node, segments } = resolvedFiles[index]
+    const entry = node.entryId === undefined ? undefined : entriesById.get(node.entryId)
+    if (!entry || entry.k !== "f" || entry.s === undefined) continue
+    const parent = await ensureDirectory(segments.slice(0, -1))
+    const fileHandle = await parent.getFileHandle(segments[segments.length - 1], { create: true })
+    const engine = new DownloadEngine({
+      session: input.session,
+      info: {
+        ...input.info,
+        entryId: entry.id,
+        path: entry.p,
+        size: entry.s,
+        mtime: entry.m,
+      },
+      localName: segments[segments.length - 1],
+      sink: new FsaSink(),
+      fileHandle,
+      onProgress: (progress, id) => {
+        input.onFileProgress(progress, id)
+        input.onProgress(index, resolvedFiles.length, entry.p)
+      },
+    })
+    input.onCreated(engine, segments.join("/"))
+    await engine.start()
+    if (engine.currentState !== "completed") {
+      throw new Error(`Could not download “${entry.p}”. Check the Downloads page for details.`)
+    }
+    input.onProgress(index + 1, resolvedFiles.length, entry.p)
+  }
+
+  input.onProgress(resolvedFiles.length, resolvedFiles.length, "")
 }
 
 function toBase64(bytes: Uint8Array): string {

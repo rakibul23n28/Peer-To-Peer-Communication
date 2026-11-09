@@ -1,17 +1,18 @@
 import { Module } from "@nestjs/common"
 
 import { AuthModule } from "../auth/auth.module.js"
+import { PresenceModule } from "../presence/presence.module.js"
 
-import { UsersController } from "./users.controller.js"
+import { MePrivacySettingsController, UsersController } from "./users.controller.js"
 
 import { UsersRepository } from "./users.repository.js"
 
 import { UsersService } from "./users.service.js"
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, PresenceModule],
 
-  controllers: [UsersController],
+  controllers: [UsersController, MePrivacySettingsController],
 
   providers: [UsersRepository, UsersService],
 

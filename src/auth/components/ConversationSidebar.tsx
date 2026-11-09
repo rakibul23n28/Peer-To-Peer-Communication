@@ -3,6 +3,8 @@ import type { ConversationSummary, UserIdentity } from '../session';
 import type { OrbitConnectionState } from '../orbitSocket';
 import { OrbitMark, initials } from './OrbitMark';
 import { OrbitIcon } from './OrbitIcon';
+import { PresenceIndicator } from './PresenceIndicator';
+import type { ClientPresenceStatus } from '../presenceStore';
 
 interface ConversationSidebarProps {
   user: UserIdentity;
@@ -10,6 +12,7 @@ interface ConversationSidebarProps {
   conversations: ConversationSummary[];
   selectedId: string | null;
   previews: Record<string, string>;
+  presenceByUser: Record<string, ClientPresenceStatus>;
   loading: boolean;
   error: string;
   connection: OrbitConnectionState;
@@ -46,6 +49,7 @@ export function ConversationSidebar({
   conversations,
   selectedId,
   previews,
+  presenceByUser,
   loading,
   error,
   connection,
@@ -98,7 +102,7 @@ export function ConversationSidebar({
         onClick={() => onSelect(id)}
         aria-current={selectedId === id ? 'page' : undefined}
       >
-        <span className="orbit-avatar">{initials(peer.displayName)}</span>
+        <span className="orbit-avatar">{initials(peer.displayName)}<PresenceIndicator status={presenceByUser[peer.id] ?? 'offline'} compact /></span>
         <span className="orbit-conversation-copy">
           <span className="orbit-conversation-title"><strong>{peer.displayName}</strong><time dateTime={lastMessage?.createdAt ?? undefined}>{messageTime(lastMessage?.createdAt ?? null)}</time></span>
           <small>{previews[id] ?? (lastMessage ? 'Decrypting message…' : 'No messages yet')}</small>

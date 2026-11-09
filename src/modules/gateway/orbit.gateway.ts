@@ -40,6 +40,9 @@ import {
   type SharedFolderEvent,
 } from "../shared-folders/shared-folders-events.js"
 import { SharedFoldersService } from "../shared-folders/shared-folders.service.js"
+import { PresenceEvents } from "../presence/presence-events.js"
+import { PresenceService } from "../presence/presence.service.js"
+import { AccessRequestEvents } from "../access-requests/access-request-events.js"
 import {
   previewRtcPayloadSchema,
   previewSignalDirectionValid,
@@ -79,6 +82,18 @@ const messageSchema = z
 const peerFileRequestSchema = z.object({
   conversationId: z.string().uuid(),
   requestId: z.string().uuid(),
+}).strict()
+
+const presenceIdleSchema = z.object({ idle: z.boolean() }).strict()
+const shareAvailabilitySchema = z.object({
+  shareId: z.string().uuid(),
+  state: z.enum(["available", "needs_permission", "needs_reselect", "unavailable"]),
+  downloads: z.boolean(),
+  since: z.number().int().nonnegative(),
+}).strict()
+const shareViewingSchema = z.object({
+  shareId: z.string().uuid(),
+  viewing: z.boolean(),
 }).strict()
 
 const audioCallInviteSchema = z.object({
@@ -169,6 +184,7 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   private server!: WsServer
 
   private readonly users = new WeakMap<WebSocket, string>()
+  private readonly presenceConnectionIds = new WeakMap<WebSocket, string>()
 
   private readonly authTimers =
     new WeakMap<WebSocket, ReturnType<typeof setTimeout>>()
@@ -194,6 +210,8 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
   private audioCallExpiryTimer: ReturnType<typeof setInterval> | null = null
   private unsubscribeSharedFolderEvents: (() => void) | null = null
+  private unsubscribePresenceEvents: (() => void) | null = null
+  private unsubscribeAccessRequestEvents: (() => void) | null = null
 
   constructor(
     private readonly auth: AuthService,
@@ -207,12 +225,42 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     private readonly sharedFolderEvents: SharedFoldersEvents,
 
     private readonly sharedFolders: SharedFoldersService,
+    private readonly presence: PresenceService,
+    private readonly presenceEvents: PresenceEvents,
+    private readonly accessRequestEvents: AccessRequestEvents,
   ) {}
 
   onModuleInit(): void {
     this.audioCallExpiryTimer = setInterval(() => this.expireAudioCalls(), 5_000)
     this.unsubscribeSharedFolderEvents = this.sharedFolderEvents.subscribe((event) => {
       void this.broadcastSharedFolderEvent(event)
+    })
+    this.unsubscribePresenceEvents = this.presenceEvents.subscribe((delivery) => {
+      this.sendToUsers(delivery.recipients, {
+        type: delivery.event,
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: delivery.payload,
+      })
+    })
+    this.unsubscribeAccessRequestEvents = this.accessRequestEvents.subscribe((event) => {
+      const recipients = event.type === "access_request.created"
+        ? [event.ownerId]
+        : [event.requesterId]
+      this.sendToUsers(recipients, {
+        type: event.type,
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: {
+          requestId: event.requestId,
+          conversationId: event.conversationId,
+          shareId: event.shareId,
+          requesterId: event.requesterId,
+          ownerId: event.ownerId,
+          kind: event.kind,
+          status: event.status,
+        },
+      })
     })
   }
 
@@ -221,6 +269,10 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     this.audioCallExpiryTimer = null
     this.unsubscribeSharedFolderEvents?.()
     this.unsubscribeSharedFolderEvents = null
+    this.unsubscribePresenceEvents?.()
+    this.unsubscribePresenceEvents = null
+    this.unsubscribeAccessRequestEvents?.()
+    this.unsubscribeAccessRequestEvents = null
   }
 
   private async broadcastSharedFolderEvent(event: SharedFolderEvent): Promise<void> {
@@ -281,6 +333,9 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     if (timer) clearTimeout(timer)
 
     const disconnectedUserId = this.users.get(client)
+    const presenceConnectionId = this.presenceConnectionIds.get(client)
+    if (presenceConnectionId) void this.presence.disconnect(presenceConnectionId)
+    this.presenceConnectionIds.delete(client)
     if (disconnectedUserId) {
       for (const [key, session] of this.previewSessions) {
         if (session.viewerId !== disconnectedUserId && session.ownerId !== disconnectedUserId) continue
@@ -330,6 +385,16 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       const timer = this.authTimers.get(client)
 
       if (timer) clearTimeout(timer)
+
+      const presenceConnectionId = this.presence.createConnectionId()
+      this.presenceConnectionIds.set(client, presenceConnectionId)
+      const snapshot = await this.presence.connect(presenceConnectionId, userId)
+      this.sendToSocket(client, {
+        type: "presence.snapshot",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: snapshot,
+      })
 
       return { type: "auth.ok", id: randomUUID(), ts: Date.now(), payload: {} }
     } catch (error) {
@@ -668,7 +733,18 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         : {}),
       kind: input.kind,
     })
-    const context = await this.sharedFolders.previewContext(input.shareId, userId)
+    let context: Awaited<ReturnType<SharedFoldersService["previewContext"]>>
+    try {
+      context = await this.sharedFolders.previewContext(input.shareId, userId)
+    } catch {
+      this.sendToSocket(client, {
+        type: "preview.unavailable",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: { shareId: input.shareId, sessionId: input.sessionId, reason: "offline" },
+      })
+      return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: false } }
+    }
     const isOwner = context.ownerId === userId
     if (!previewSignalDirectionValid(isOwner, input.kind)) {
       throw new HttpException("Only the folder owner can answer a preview.", 403)
@@ -709,18 +785,38 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       throw new HttpException("Preview session not found.", 404)
     }
 
-    if (!this.hasConnectedUser(recipientId)) {
+    const ownerVisibility = await this.presence.currentAvailability(input.shareId, context.ownerId)
+    const availableOwnerSockets = input.kind === "offer" && !isOwner
+      ? [...this.server.clients].filter((socket) => {
+          const connectionId = this.presenceConnectionIds.get(socket)
+          return socket.readyState === WebSocket.OPEN &&
+            this.users.get(socket) === context.ownerId &&
+            Boolean(connectionId && this.presence.connectionCanServe(connectionId, input.shareId))
+        })
+      : []
+    const unavailableOffer = input.kind === "offer" && !isOwner && availableOwnerSockets.length === 0
+    if (unavailableOffer || (input.kind !== "offer" && !this.hasConnectedUser(recipientId))) {
       this.sendToUser(userId, {
         type: "preview.unavailable",
         id: randomUUID(),
         ts: now,
-        payload: { shareId: input.shareId, sessionId: input.sessionId, reason: "peer_offline" },
+        payload: {
+          shareId: input.shareId,
+          sessionId: input.sessionId,
+          reason: !ownerVisibility.visible || !ownerVisibility.online
+            ? "offline"
+            : ownerVisibility.availability?.state === "needs_permission"
+              ? "needs_permission"
+              : ownerVisibility.availability?.state === "needs_reselect"
+                ? "needs_reselect"
+                : "offline",
+        },
       })
       if (input.kind === "offer" || input.kind === "bye") this.previewSessions.delete(sessionKey)
       return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: false } }
     }
 
-    this.sendToUser(recipientId, {
+    const signalEvent = {
       type: "preview.signal",
       id: randomUUID(),
       ts: now,
@@ -731,10 +827,57 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         payload: rtcPayload,
         senderId: userId,
       },
-    })
+    }
+    if (input.kind === "offer" && !isOwner) {
+      for (const ownerSocket of availableOwnerSockets) this.sendToSocket(ownerSocket, signalEvent)
+    } else {
+      this.sendToUser(recipientId, signalEvent)
+    }
     if (input.kind === "bye") this.previewSessions.delete(sessionKey)
     else if (existing) existing.expiresAt = now + 60 * 60_000
     return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: true } }
+  }
+
+  presenceHeartbeat(client: WebSocket) {
+    const connectionId = this.presenceConnectionIds.get(client)
+    const accepted = connectionId ? this.presence.heartbeat(connectionId) : false
+    return { type: "presence.heartbeat.ack", payload: { ok: accepted } }
+  }
+
+  async presenceIdle(client: WebSocket, body: unknown) {
+    const userId = await this.authenticatedUser(client)
+    const input = presenceIdleSchema.parse(body)
+    const connectionId = this.presenceConnectionIds.get(client)
+    const accepted = connectionId
+      ? await this.presence.setIdle(connectionId, input.idle)
+      : false
+    return { type: "presence.idle.ack", payload: { userId, idle: input.idle, accepted } }
+  }
+
+  async reportShareAvailability(client: WebSocket, body: unknown) {
+    await this.authenticatedUser(client)
+    const input = shareAvailabilitySchema.parse(body)
+    const connectionId = this.presenceConnectionIds.get(client)
+    try {
+      if (connectionId) await this.presence.setAvailability(connectionId, input)
+      return { type: "share.availability.ack", id: input.shareId, payload: { accepted: true } }
+    } catch (error) {
+      this.logger.warn(`Share availability update rejected (${error instanceof Error ? error.name : "unknown"})`)
+      return { type: "share.availability.ack", id: input.shareId, payload: { accepted: false } }
+    }
+  }
+
+  async reportShareViewing(client: WebSocket, body: unknown) {
+    await this.authenticatedUser(client)
+    const input = shareViewingSchema.parse(body)
+    const connectionId = this.presenceConnectionIds.get(client)
+    try {
+      if (connectionId) await this.presence.setViewing(connectionId, input.shareId, input.viewing)
+      return { type: "share.viewing.ack", id: input.shareId, payload: { accepted: true } }
+    } catch (error) {
+      this.logger.warn(`Share viewing update rejected (${error instanceof Error ? error.name : "unknown"})`)
+      return { type: "share.viewing.ack", id: input.shareId, payload: { accepted: false } }
+    }
   }
 
   async inviteAudioCall(client: WebSocket, body: unknown) {
@@ -981,6 +1124,17 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     }
   }
 
+  private sendToUsers(userIds: string[], event: Record<string, unknown>): void {
+    const recipients = new Set(userIds)
+    const serialized = JSON.stringify({ event: event.type, data: event })
+    for (const client of this.server.clients) {
+      const userId = this.users.get(client)
+      if (client.readyState === WebSocket.OPEN && userId && recipients.has(userId)) {
+        client.send(serialized)
+      }
+    }
+  }
+
   private safeErrorMessage(error: unknown): string {
     if (error instanceof HttpException) {
       const response = error.getResponse()
@@ -1068,6 +1222,9 @@ const constructorTarget = OrbitGateway as unknown as object
 ;(Inject(FilesService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 3)
 ;(Inject(SharedFoldersEvents) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 4)
 ;(Inject(SharedFoldersService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 5)
+;(Inject(PresenceService) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 6)
+;(Inject(PresenceEvents) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 7)
+;(Inject(AccessRequestEvents) as unknown as LegacyParameterDecorator)(constructorTarget, undefined, 8)
 
 const registerHandler = (event: string, method: keyof OrbitGateway): void => {
   const descriptor = Object.getOwnPropertyDescriptor(gatewayPrototype, method)
@@ -1088,6 +1245,10 @@ registerHandler("file.peer.request", "requestPeerFileShare")
 registerHandler("file.peer.response", "respondToPeerFileShare")
 registerHandler("file.peer.signal", "relayFileSignal")
 registerHandler("preview.signal", "relayPreviewSignal")
+registerHandler("presence.heartbeat", "presenceHeartbeat")
+registerHandler("presence.idle", "presenceIdle")
+registerHandler("share.availability", "reportShareAvailability")
+registerHandler("share.viewing", "reportShareViewing")
 registerHandler("call.invite", "inviteAudioCall")
 registerHandler("call.respond", "respondToAudioCall")
 registerHandler("call.cancel", "cancelAudioCall")

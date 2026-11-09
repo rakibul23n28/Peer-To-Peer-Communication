@@ -8,6 +8,10 @@ import {
   deleteMessage,
   editMessage,
   getUserPublicKeys,
+  getPresenceSnapshot,
+  getPrivacySettings,
+  updatePrivacySettings as persistPrivacySettings,
+  createAccessRequest,
   getMessages,
   getConversations,
   listBlocks,
@@ -20,6 +24,7 @@ import {
   type EncryptedMessage,
   type UserIdentity,
   type UserSearchResult,
+  type PrivacySettings,
 } from './session';
 import {
   retryOrbitSocket,
@@ -30,13 +35,26 @@ import {
   subscribeOrbitEvents,
   type OrbitConnectionState,
 } from './orbitSocket';
-import { decryptMessage, derivePeerKey, encryptMessage } from './messageCrypto';
+import {
+  decryptMessage,
+  derivePeerKey,
+  encryptAccessRequestNote,
+  encryptMessage,
+} from './messageCrypto';
 import { encryptFolderManifest, decryptFolderManifest } from './shared-folders/crypto';
 import { createSharedFolder, listSharedFolders, revokeSharedFolder } from './shared-folders/api';
 import { makeManifest, pickFolder, type PickedFolder } from './shared-folders/picker';
 import { PreviewServer, type PreviewServerNotice } from './shared-folders/previewServer';
 import { PreviewSessionManager } from './shared-folders/previewSession';
 import { DownloadsPanel } from './shared-folders/DownloadsPanel';
+import {
+  listWatchedShares,
+  markWatchNotified,
+  saveWatchedShare,
+  shouldNotifyAvailability,
+  unwatchShare,
+  watchShare,
+} from './shared-folders/watchedShares';
 import {
   deleteFolderHandle,
   getFolderSelection,
@@ -58,6 +76,15 @@ import { ConversationSidebar } from './components/ConversationSidebar';
 import { EmptyConversationState } from './components/EmptyConversationState';
 import { OrbitDialogs, type OrbitDialogKind } from './components/OrbitDialogs';
 import { WorkspaceDetails } from './components/WorkspaceDetails';
+import {
+  applyPresenceEvent,
+  clearPresence,
+  getPresenceState,
+  replacePresenceSnapshot,
+  subscribePresence,
+  type ClientAvailability,
+  type ClientPresenceState,
+} from './presenceStore';
 
 type WorkspaceAppearance = 'storybook' | 'minimal' | 'watercolor' | 'anime' | 'midnight';
 
@@ -269,6 +296,25 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [connection, setConnection] = useState<OrbitConnectionState>('offline');
   const [connectionError, setConnectionError] = useState('');
+  const [presenceState, setPresenceState] = useState<ClientPresenceState>(getPresenceState);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>({
+    presenceVisible: true,
+    showViewingActivity: true,
+    acceptAccessRequests: 'contacts',
+  });
+  const [privacySettingsBusy, setPrivacySettingsBusy] = useState(false);
+  const [browserNotifications, setBrowserNotifications] = useState(
+    () => readWorkspacePreference('orbit-browser-notifications', 'false') === 'true',
+  );
+  const [includeFolderNames, setIncludeFolderNames] = useState(
+    () => readWorkspacePreference('orbit-notification-folder-names', 'false') === 'true',
+  );
+  const [searchIndexEnabled, setSearchIndexEnabled] = useState(
+    () => readWorkspacePreference('orbit-search-index-enabled', 'true') === 'true',
+  );
+  const [localAvailability, setLocalAvailability] = useState<Record<string, ClientAvailability>>({});
+  const [watchedShareIds, setWatchedShareIds] = useState<Set<string>>(new Set());
+  const [watchesLoaded, setWatchesLoaded] = useState(false);
   const [dialog, setDialog] = useState<OrbitDialogKind>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserSearchResult[]>([]);
@@ -276,6 +322,13 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const [searching, setSearching] = useState(false);
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
+  const [accessRequestDialog, setAccessRequestDialog] = useState<{
+    shareId: string;
+    conversationId: string;
+    kind: 'availability' | 'download_permission' | 'reshare';
+  } | null>(null);
+  const [accessRequestNote, setAccessRequestNote] = useState('');
+  const [accessRequestSending, setAccessRequestSending] = useState(false);
   const [previewOwnerNotice, setPreviewOwnerNotice] = useState<PreviewServerNotice | null>(null);
   const [refreshingPeerKey, setRefreshingPeerKey] = useState(false);
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([]);
@@ -341,11 +394,179 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const threadRefreshInFlightRef = useRef(false);
   const peerPublicKeysRef = useRef(new Map<string, Promise<string>>());
   const peerPublicKeyHistoryRef = useRef(new Map<string, Promise<Awaited<ReturnType<typeof getUserPublicKeys>>>>());
+  const availabilitySinceRef = useRef(new Map<string, { state: string; downloads: boolean; since: number }>());
+  const lastPresenceActivityRef = useRef(Date.now());
+  const idleSentRef = useRef<boolean | null>(null);
   const fileTransfersRef = useRef(new Map<string, PeerFileTransfer>());
   const sourceFilesRef = useRef(new Map<string, File>());
   const fileInfoRef = useRef(new Map<string, { size: number; mime: string; sha256: string; recipientKeyVersion: number }>());
   const audioCallSessionRef = useRef<PeerAudioCall | null>(null);
   const startingAudioCallRef = useRef(false);
+
+  const reportShareAvailability = useCallback(async (shareId?: string) => {
+    if (connectionRef.current !== 'connected') return;
+    const server = previewServerRef.current;
+    if (!server) return;
+    const shares = shareId
+      ? [[shareId, previewOwnerSharesRef.current.get(shareId)] as const]
+      : [...previewOwnerSharesRef.current.entries()];
+    for (const [id, ownerShare] of shares) {
+      if (!ownerShare) continue;
+      try {
+        const availability = await server.availability(id);
+        const previous = availabilitySinceRef.current.get(id);
+        const since = previous && previous.state === availability.state &&
+          previous.downloads === availability.downloads
+          ? previous.since
+          : Date.now();
+        availabilitySinceRef.current.set(id, {
+          state: availability.state,
+          downloads: availability.downloads,
+          since,
+        });
+        const item: ClientAvailability = {
+          shareId: id,
+          ownerId: user.id,
+          conversationId: ownerShare.conversation.id,
+          ...availability,
+          since,
+        };
+        setLocalAvailability((current) => ({ ...current, [id]: item }));
+        sendOrbitEvent('share.availability', {
+          shareId: id,
+          ...availability,
+          since,
+        });
+      } catch (error) {
+        setPreviewOwnerNotice({
+          type: 'error',
+          shareId: id,
+          message: error instanceof Error
+            ? error.message
+            : 'Could not check shared-folder availability.',
+        });
+      }
+    }
+  }, [user.id]);
+
+  const reportViewing = useCallback((shareId: string, viewing: boolean): void => {
+    if (!privacySettings.showViewingActivity || !privacySettings.presenceVisible) return;
+    try {
+      sendOrbitEvent('share.viewing', { shareId, viewing });
+    } catch {
+      // The next viewing refresh will restore state after reconnect.
+    }
+  }, [privacySettings.presenceVisible, privacySettings.showViewingActivity]);
+
+  function requestFolderAccess(
+    shareId: string,
+    kind: 'availability' | 'download_permission' | 'reshare',
+  ): void {
+    if (!selected) return;
+    setAccessRequestNote('');
+    setAccessRequestDialog({ shareId, conversationId: selected.id, kind });
+  }
+
+  async function sendAccessRequest(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const request = accessRequestDialog;
+    const conversation = selected;
+    if (!request || !conversation || conversation.id !== request.conversationId || accessRequestSending) return;
+    if (!deviceIdentity) {
+      setActionError('Your encryption key is not ready yet.');
+      return;
+    }
+    const note = accessRequestNote.trim();
+    if (note.length > 280) {
+      setActionError('Access request notes must be 280 characters or fewer.');
+      return;
+    }
+    setAccessRequestSending(true);
+    try {
+      const requestId = crypto.randomUUID();
+      const encryptedNote = note
+        ? await encryptAccessRequestNote(deviceIdentity, conversation, requestId, note)
+        : undefined;
+      await createAccessRequest(conversation.id, {
+        requestId,
+        shareId: request.shareId,
+        kind: request.kind,
+        ...(encryptedNote
+          ? { noteCiphertext: encryptedNote.ciphertext, noteIv: encryptedNote.iv }
+          : {}),
+      });
+      setAccessRequestDialog(null);
+      setNotice('Access request sent. Your contact will see it when they are online.');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not send the access request.');
+    } finally {
+      setAccessRequestSending(false);
+    }
+  }
+
+  async function toggleShareWatch(shareId: string): Promise<void> {
+    if (!selected) return;
+    try {
+      if (watchedShareIds.has(shareId)) {
+        await unwatchShare(shareId);
+        setWatchedShareIds((current) => {
+          const next = new Set(current);
+          next.delete(shareId);
+          return next;
+        });
+        return;
+      }
+      const currentAvailability = presenceState.availability[shareId];
+      await watchShare(
+        shareId,
+        selected.id,
+        currentAvailability?.state === 'available' ? currentAvailability.since : 0,
+      );
+      setWatchedShareIds((current) => new Set(current).add(shareId));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Availability notification could not be changed.');
+    }
+  }
+
+  async function savePrivacySettings(next: PrivacySettings): Promise<void> {
+      const previous = privacySettings;
+      setPrivacySettings(next);
+      setPrivacySettingsBusy(true);
+      try {
+        setPrivacySettings(await persistPrivacySettings(next));
+      } catch (error) {
+        setPrivacySettings(previous);
+        setActionError(error instanceof Error ? error.message : 'Privacy settings could not be saved.');
+      } finally {
+        setPrivacySettingsBusy(false);
+      }
+  }
+
+  async function handleBrowserNotifications(enabled: boolean): Promise<void> {
+      if (!enabled) {
+        setLocalPreference('orbit-browser-notifications', false, setBrowserNotifications);
+        return;
+      }
+      if (!('Notification' in window)) {
+        setActionError('This browser does not support browser notifications.');
+        return;
+      }
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      const allowed = permission === 'granted';
+      setLocalPreference('orbit-browser-notifications', allowed, setBrowserNotifications);
+      if (!allowed) setActionError('Browser notification permission was not granted.');
+  }
+
+  function setLocalPreference(key: string, value: boolean, update: (enabled: boolean) => void): void {
+      try {
+        localStorage.setItem(key, String(value));
+        update(value);
+      } catch {
+        setActionError('This browser could not save the local preference.');
+    }
+  }
 
   function updateAudioCall(
     update: AudioCallView | null | ((current: AudioCallView | null) => AudioCallView | null),
@@ -656,6 +877,120 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     };
   }, [loadConversations]);
 
+  useEffect(() => subscribePresence(() => setPresenceState(getPresenceState())), []);
+
+  useEffect(() => {
+    let active = true;
+    void listWatchedShares().then((watches) => {
+      if (active) setWatchedShareIds(new Set(watches.map(({ shareId }) => shareId)));
+    }).catch((error: unknown) => {
+      if (active) setActionError(error instanceof Error ? error.message : 'Availability watches could not be loaded.');
+    }).finally(() => {
+      if (active) setWatchesLoaded(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!watchesLoaded) return;
+    let active = true;
+    void listWatchedShares().then(async (watches) => {
+      for (const watch of watches) {
+        const availability = presenceState.availability[watch.shareId];
+        if (!availability || !shouldNotifyAvailability(watch, availability, Date.now())) continue;
+        const contactName = conversationsRef.current.find(({ peer }) => peer.id === availability.ownerId)?.peer.displayName;
+        const folderName = threadMessages.find((item) => item.sharedFolder?.id === watch.shareId)
+          ?.sharedFolder?.manifest?.rootName;
+        const text = includeFolderNames && folderName
+          ? `The folder “${folderName}” from ${contactName ?? 'your contact'} is now available`
+          : `A folder from ${contactName ?? 'your contact'} is now available`;
+        setNotice(text);
+        if (browserNotifications && document.visibilityState === 'hidden' &&
+          'Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(text);
+          } catch (error) {
+            setActionError(error instanceof Error ? error.message : 'Browser notification could not be shown.');
+          }
+        }
+        await saveWatchedShare(markWatchNotified(watch, availability, Date.now()));
+        await unwatchShare(watch.shareId);
+        if (active) {
+          setWatchedShareIds((current) => {
+            const next = new Set(current);
+            next.delete(watch.shareId);
+            return next;
+          });
+        }
+      }
+    }).catch((error: unknown) => {
+      if (active) setActionError(error instanceof Error ? error.message : 'Availability notifications could not be processed.');
+    });
+    return () => { active = false; };
+  }, [browserNotifications, includeFolderNames, presenceState.availability, threadMessages, watchesLoaded]);
+
+  useEffect(() => {
+    let active = true;
+    void getPrivacySettings().then((settings) => {
+      if (active) setPrivacySettings(settings);
+    }).catch((error: unknown) => {
+      if (active) setNotice(error instanceof Error ? error.message : 'Privacy settings could not be loaded.');
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (connection !== 'connected') return;
+    let active = true;
+    const send = (event: string, data: unknown = {}) => {
+      try {
+        sendOrbitEvent(event, data);
+      } catch {
+        // Reconnect starts a new heartbeat and applies a replacement snapshot.
+      }
+    };
+    void getPresenceSnapshot().then((snapshot) => {
+      if (active) replacePresenceSnapshot(snapshot);
+    }).catch((error: unknown) => {
+      if (active) setNotice(error instanceof Error ? error.message : 'Presence could not be refreshed.');
+    });
+    send('presence.heartbeat');
+    const heartbeat = window.setInterval(() => send('presence.heartbeat'), 25_000);
+    const publishIdle = () => {
+      const idle = Date.now() - lastPresenceActivityRef.current >= 5 * 60_000;
+      if (idleSentRef.current === idle) return;
+      idleSentRef.current = idle;
+      send('presence.idle', { idle });
+    };
+    const markActive = () => {
+      lastPresenceActivityRef.current = Date.now();
+      publishIdle();
+    };
+    const idleCheck = window.setInterval(publishIdle, 15_000);
+    const activityEvents = ['pointerdown', 'keydown', 'touchstart'] as const;
+    for (const event of activityEvents) window.addEventListener(event, markActive, { passive: true });
+    document.addEventListener('visibilitychange', publishIdle);
+    window.addEventListener('focus', markActive);
+    publishIdle();
+    void reportShareAvailability();
+    const checkAvailability = () => void reportShareAvailability();
+    const availabilityTimer = window.setInterval(checkAvailability, 30_000);
+    window.addEventListener('focus', checkAvailability);
+    document.addEventListener('visibilitychange', checkAvailability);
+    return () => {
+      active = false;
+      window.clearInterval(heartbeat);
+      window.clearInterval(idleCheck);
+      window.clearInterval(availabilityTimer);
+      for (const event of activityEvents) window.removeEventListener(event, markActive);
+      document.removeEventListener('visibilitychange', publishIdle);
+      window.removeEventListener('focus', markActive);
+      window.removeEventListener('focus', checkAvailability);
+      document.removeEventListener('visibilitychange', checkAvailability);
+      idleSentRef.current = null;
+    };
+  }, [connection, privacySettings.presenceVisible, reportShareAvailability]);
+
   useEffect(() => {
     if (dialog !== 'search' || query.trim().length < 3) {
       setResults([]);
@@ -702,6 +1037,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   function leaveSession(): void {
     previewServerRef.current?.closeAll();
     previewSessionManagerRef.current?.closeAll();
+    clearPresence();
     onSignOut();
   }
 
@@ -962,9 +1298,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           if (active) setThreadError('Could not restore a folder preview source. Retry the conversation to try again.');
         }
       }
+      if (active) await reportShareAvailability();
     })();
     return () => { active = false };
-  }, [connection, conversations, decryptFolderWithAvailableKeyVersions, deviceIdentity, user.id]);
+  }, [connection, conversations, decryptFolderWithAvailableKeyVersions, deviceIdentity, reportShareAvailability, user.id]);
 
   useEffect(() => {
     if (dialog === 'settings') void refreshBlockedUsers();
@@ -1357,6 +1694,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   useEffect(() => {
     const unsubscribe = subscribeOrbitEvents((envelope) => {
+      applyPresenceEvent(envelope);
       if (envelope.event.startsWith('call.')) {
         handleAudioCallEvent(envelope.event, envelope.data);
       }
@@ -1417,6 +1755,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           previewServerRef.current?.closeShare(payload.id);
           previewSessionManagerRef.current?.closeShare(payload.id);
           previewOwnerSharesRef.current.delete(payload.id);
+          availabilitySinceRef.current.delete(payload.id);
+          setLocalAvailability((current) => {
+            const next = { ...current };
+            delete next[payload.id!];
+            return next;
+          });
           setThreadMessages((current) => current.map((item) =>
             item.sharedFolder && item.sharedFolder.id === payload.id
               ? { ...item, sharedFolder: { ...item.sharedFolder, status: 'revoked' } }
@@ -1473,6 +1817,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           previewSessionManagerRef.current?.peerUnavailable(
             event.payload.shareId,
             event.payload.sessionId,
+            event.payload.reason === 'needs_permission' || event.payload.reason === 'needs_reselect'
+              ? event.payload.reason
+              : 'offline',
           );
         }
       }
@@ -1925,11 +2272,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         persistHandle: false,
         allowDownloads,
       })
+      previewOwnerSharesRef.current.set(shareId, { manifest, conversation })
+      await reportShareAvailability(shareId)
     } catch (error) {
       await deleteFolderHandle(shareId)
       throw error
     }
-    previewOwnerSharesRef.current.set(shareId, { manifest, conversation })
     setNotice('Folder structure shared end-to-end encrypted. No file contents were uploaded.')
     await refreshThread(true)
   }
@@ -1960,6 +2308,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         fallbackFiles: picked.handle ? undefined : fallbackFiles,
         allowDownloads: selection?.allowDownloads ?? true,
       })
+      await reportShareAvailability(shareId)
       setPreviewOwnerNotice(null)
       setNotice('Folder preview access restored.')
     } catch (error) {
@@ -1981,6 +2330,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         allowDownloads: allowed,
       })
       previewServerRef.current?.setDownloadsAllowed(shareId, allowed)
+      await reportShareAvailability(shareId)
       setPreviewOwnerNotice((notice) => notice?.shareId === shareId
         ? { ...notice, allowDownloads: allowed }
         : notice)
@@ -1993,6 +2343,20 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }
   }
 
+  async function setSharePaused(shareId: string, paused: boolean): Promise<void> {
+    try {
+      previewServerRef.current?.setPaused(shareId, paused)
+      await reportShareAvailability(shareId)
+      setNotice(paused ? 'Sharing paused. Existing transfers may continue.' : 'Sharing resumed.')
+    } catch (error) {
+      setPreviewOwnerNotice({
+        type: 'error',
+        shareId,
+        message: error instanceof Error ? error.message : 'Could not change sharing availability.',
+      })
+    }
+  }
+
   async function regrantPreviewFolder(shareId: string): Promise<void> {
     try {
       const granted = await previewServerRef.current?.requestPermission(shareId)
@@ -2001,6 +2365,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         return
       }
       setPreviewOwnerNotice(null)
+      await reportShareAvailability(shareId)
       setNotice('Folder access restored. Your contact can retry the preview.')
     } catch {
       setPreviewOwnerNotice({
@@ -2222,6 +2587,36 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     data-appearance={workspaceAppearance}
     style={workspaceLayoutStyle}
   >
+    {accessRequestDialog && selected?.id === accessRequestDialog.conversationId && <div className="orbit-folder-backdrop" role="presentation">
+      <section className="orbit-folder-dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-access-request-title">
+        <h2 id="orbit-access-request-title">
+          {accessRequestDialog.kind === 'download_permission'
+            ? 'Ask for download permission'
+            : accessRequestDialog.kind === 'reshare'
+              ? `Ask ${selected.peer.displayName} to share again`
+              : `Ask ${selected.peer.displayName} to open the folder`}
+        </h2>
+        <form onSubmit={(event) => void sendAccessRequest(event)}>
+          <label htmlFor="orbit-access-request-note">Optional note (up to 280 characters)</label>
+          <textarea
+            id="orbit-access-request-note"
+            value={accessRequestNote}
+            maxLength={280}
+            onChange={(event) => setAccessRequestNote(event.target.value)}
+            placeholder="Add a short note"
+          />
+          <p>This note is encrypted on your device. Orbit's server cannot read it.</p>
+          <div className="orbit-shared-folder-actions">
+            <button type="submit" disabled={accessRequestSending || !deviceIdentity}>
+              {accessRequestSending ? 'Sending…' : 'Send request'}
+            </button>
+            <button type="button" onClick={() => setAccessRequestDialog(null)} disabled={accessRequestSending}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>}
     {previewOwnerNotice && <aside className="orbit-preview-owner-banner" role="status">
       {previewOwnerNotice.type === 'activity'
         ? <span>{previewOwnerNotice.viewerName ?? 'Your contact'} is {previewOwnerNotice.progress === undefined
@@ -2250,6 +2645,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           : previewOwnerNotice.type === 'repick'
             ? <button type="button" onClick={() => void restorePreviewFolder(previewOwnerNotice.shareId)}>Choose folder</button>
             : null}
+      {previewOwnerNotice.type !== 'error' && previewOwnerNotice.type !== 'activity' && <button type="button" onClick={() => void setSharePaused(
+        previewOwnerNotice.shareId,
+        !previewServerRef.current?.isPaused(previewOwnerNotice.shareId),
+      )}>
+        {previewServerRef.current?.isPaused(previewOwnerNotice.shareId) ? 'Resume sharing' : 'Pause sharing'}
+      </button>}
     </aside>}
     <DownloadsPanel />
     <ConversationSidebar
@@ -2258,6 +2659,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       conversations={conversations}
       selectedId={selectedId}
       previews={conversationPreviews}
+      presenceByUser={presenceState.presence}
       loading={loadingConversations}
       error={conversationError}
       connection={connection}
@@ -2288,6 +2690,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       {selected && <ConversationThread
         conversation={selected}
         user={user}
+        peerPresenceStatus={presenceState.presence[selected.peer.id] ?? 'offline'}
+        availabilityByShare={{ ...presenceState.availability, ...localAvailability }}
+        viewersByShare={presenceState.viewers}
         connection={connection}
         deviceIdentityAvailable={Boolean(deviceIdentity)}
         peerBlocked={peerBlocked}
@@ -2345,6 +2750,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         onOfferFile={(file) => void offerFile(file)}
         onShareFolder={shareFolder}
         onPreviewSignal={sendPreviewSignal}
+        onShareViewing={reportViewing}
+        onRequestAccess={(shareId, kind) => { void requestFolderAccess(shareId, kind); }}
+        watchedShareIds={watchedShareIds}
+        onToggleWatch={(shareId) => void toggleShareWatch(shareId)}
         onRevokeFolder={(id) => void stopSharingFolder(id)}
         onReplyChange={setReplyTo}
         onDraftChange={setDraft}
@@ -2392,12 +2801,21 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       searchError={searchError}
       loadingBlocks={loadingBlocks}
       blockedUsers={blockedUsers}
+      privacySettings={privacySettings}
+      privacySettingsBusy={privacySettingsBusy}
+      browserNotifications={browserNotifications}
+      includeFolderNames={includeFolderNames}
+      searchIndexEnabled={searchIndexEnabled}
       onQueryChange={setQuery}
       onOpenConversation={(person) => void openConversation(person)}
       onClose={() => setDialog(null)}
       onCopyFingerprint={() => void copyFingerprint(user.fingerprint)}
       onRefreshBlocks={() => void refreshBlockedUsers()}
       onUnblock={(id) => void unblockContact(id)}
+      onPrivacySettingsChange={(settings) => void savePrivacySettings(settings)}
+      onEnableBrowserNotifications={(enabled) => void handleBrowserNotifications(enabled)}
+      onIncludeFolderNamesChange={(enabled) =>
+        setLocalPreference('orbit-notification-folder-names', enabled, setIncludeFolderNames)}
       onSignOut={leaveSession}
     />
   </main>;

@@ -8,12 +8,57 @@
   --orbit-cyan: #d7ad72;
   --orbit-coral: #dd8975;
   --orbit-violet: #b7a0d4;
+  --orbit-presence-online: #4aa77a;
+  --orbit-presence-away: #d29a37;
+  --orbit-presence-offline: #85877f;
   --orbit-shadow: 0 22px 60px #00000035;
   grid-template-columns: var(--orbit-sidebar-width, 270px) minmax(0, 1fr) 0px;
   isolation: isolate;
   background: var(--orbit-bg);
   transition: background-color .22s ease, color .22s ease;
 }
+
+.orbit-avatar {
+  position: relative;
+}
+
+.orbit-presence-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--orbit-muted);
+  font-size: .72rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.orbit-presence-indicator i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border: 1px solid color-mix(in srgb, var(--orbit-bg) 55%, transparent);
+  border-radius: 50%;
+  background: var(--orbit-presence-offline);
+}
+
+.orbit-presence-indicator.is-online i { background: var(--orbit-presence-online); }
+.orbit-presence-indicator.is-away i { background: var(--orbit-presence-away); }
+.orbit-presence-indicator.is-compact {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  gap: 0;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--orbit-panel);
+}
+.orbit-presence-indicator.is-compact span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.orbit-presence-indicator.is-compact i { width: 9px; height: 9px; flex-basis: 9px; }
+.orbit-thread-person .orbit-presence-indicator { margin-top: 2px; }
+.orbit-share-availability { display: block; color: var(--orbit-muted); }
+.orbit-share-availability.is-available { color: var(--orbit-presence-online); }
+.orbit-share-availability.is-needs_permission,
+.orbit-share-availability.is-needs_reselect { color: var(--orbit-presence-away); }
 
 .orbit-shell::before {
   opacity: .08;

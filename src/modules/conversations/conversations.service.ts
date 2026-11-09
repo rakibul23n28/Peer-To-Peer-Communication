@@ -1,11 +1,13 @@
 import { Inject, Injectable } from "@nestjs/common"
 
 import { ConversationsRepository } from "./conversations.repository.js"
+import { RelationshipEvents } from "../presence/relationship-events.js"
 
 @Injectable()
 export class ConversationsService {
   constructor(
     private readonly repository: ConversationsRepository,
+    private readonly relationshipEvents: RelationshipEvents,
   ) {}
 
   async list(userId: string) {
@@ -13,7 +15,9 @@ export class ConversationsService {
   }
 
   async create(userId: string, peerId: string) {
-    return { conversation: await this.repository.create(userId, peerId) }
+    const conversation = await this.repository.create(userId, peerId)
+    this.relationshipEvents.publish({ userA: userId, userB: peerId })
+    return { conversation }
   }
 
   memberIds(conversationId: string, userId: string) {
@@ -22,3 +26,4 @@ export class ConversationsService {
 }
 
 Inject(ConversationsRepository)(ConversationsService, undefined, 0)
+Inject(RelationshipEvents)(ConversationsService, undefined, 1)

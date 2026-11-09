@@ -76,6 +76,36 @@ export class UsersRepository {
       keyVersion: key.keyVersion,
     }))
   }
+
+  privacySettings(userId: string) {
+    return this.prisma.userPrivacySettings.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+      select: {
+        presenceVisible: true,
+        showViewingActivity: true,
+        acceptAccessRequests: true,
+      },
+    })
+  }
+
+  updatePrivacySettings(userId: string, input: {
+    presenceVisible: boolean
+    showViewingActivity: boolean
+    acceptAccessRequests: "contacts" | "off"
+  }) {
+    return this.prisma.userPrivacySettings.upsert({
+      where: { userId },
+      create: { userId, ...input },
+      update: input,
+      select: {
+        presenceVisible: true,
+        showViewingActivity: true,
+        acceptAccessRequests: true,
+      },
+    })
+  }
 }
 
 Inject(PrismaService)(UsersRepository, undefined, 0)

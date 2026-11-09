@@ -58,6 +58,27 @@ export interface PublicKeyResponse {
   keyVersion: number
 }
 
+export interface PrivacySettings {
+  presenceVisible: boolean
+  showViewingActivity: boolean
+  acceptAccessRequests: "contacts" | "off"
+}
+
+export interface AccessRequestRecord {
+  id: string
+  conversationId: string
+  shareId: string | null
+  requesterId: string
+  ownerId: string
+  kind: "availability" | "download_permission" | "reshare"
+  noteCiphertext: string | null
+  noteIv: string | null
+  status: "pending" | "fulfilled" | "declined" | "canceled" | "expired"
+  createdAt: string
+  resolvedAt: string | null
+  expiresAt: string
+}
+
 export interface EncryptedMessage {
   id: string
   conversationId: string
@@ -440,6 +461,65 @@ export function getUserPublicKey(userId: string, keyVersion: number): Promise<Pu
 
 export function getUserPublicKeys(userId: string): Promise<PublicKeyResponse[]> {
   return apiRequest(`/users/${encodeURIComponent(userId)}/public-keys`)
+}
+
+export function getPrivacySettings(): Promise<PrivacySettings> {
+  return apiRequest("/me/privacy-settings")
+}
+
+export function updatePrivacySettings(settings: PrivacySettings): Promise<PrivacySettings> {
+  return apiRequest("/me/privacy-settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  })
+}
+
+export function getPresenceSnapshot(): Promise<{
+  presence: Array<{ userId: string; status: "online" | "away" | "offline" }>
+  availability: Array<{
+    shareId: string
+    ownerId: string
+    state: "available" | "needs_permission" | "needs_reselect" | "unavailable"
+    downloads: boolean
+    since: number
+  }>
+  truncated: boolean
+}> {
+  return apiRequest("/presence")
+}
+
+export function getAccessRequests(
+  role: "incoming" | "outgoing",
+  status?: AccessRequestRecord["status"],
+): Promise<AccessRequestRecord[]> {
+  const query = new URLSearchParams({ role })
+  if (status) query.set("status", status)
+  return apiRequest(`/access-requests?${query}`)
+}
+
+export function createAccessRequest(
+  conversationId: string,
+  input: {
+    requestId?: string
+    shareId?: string
+    kind: AccessRequestRecord["kind"]
+    noteCiphertext?: string
+    noteIv?: string
+  },
+): Promise<AccessRequestRecord> {
+  return apiRequest(`/conversations/${encodeURIComponent(conversationId)}/access-requests`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export function resolveAccessRequest(
+  id: string,
+  action: "cancel" | "decline",
+): Promise<AccessRequestRecord> {
+  return apiRequest(`/access-requests/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+  })
 }
 
 export function updateFileStatus(

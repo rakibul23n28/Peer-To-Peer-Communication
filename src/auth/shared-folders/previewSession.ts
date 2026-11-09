@@ -407,8 +407,13 @@ export class PreviewSession {
     this.dispose("closed")
   }
 
-  failFromPeer(): void {
-    this.fail(new Error("The folder owner is not online right now. Try again when they are back."))
+  failFromPeer(reason: "offline" | "needs_permission" | "needs_reselect" = "offline"): void {
+    const message = reason === "needs_permission"
+      ? "The folder owner needs to re-allow access before previews can start."
+      : reason === "needs_reselect"
+        ? "The folder owner needs to select the shared folder again before previews can start."
+        : "The folder owner is not online right now. Try again when they are back."
+    this.fail(new Error(message))
   }
 
   private dispose(nextState: "closed" | "failed"): void {
@@ -795,9 +800,13 @@ export class PreviewSessionManager {
     void session?.handleSignal(signal).catch(() => session.failFromPeer())
   }
 
-  peerUnavailable(shareId: string, sessionId: string): void {
+  peerUnavailable(
+    shareId: string,
+    sessionId: string,
+    reason: "offline" | "needs_permission" | "needs_reselect" = "offline",
+  ): void {
     const session = this.sessions.get(shareId)
-    if (session?.sessionId === sessionId) session.failFromPeer()
+    if (session?.sessionId === sessionId) session.failFromPeer(reason)
   }
 
   closeShare(shareId: string): void {

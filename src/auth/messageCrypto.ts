@@ -116,3 +116,53 @@ export async function decryptMessage(
   );
   return decoder.decode(plaintext);
 }
+
+export async function encryptAccessRequestNote(
+  identity: DeviceIdentity,
+  conversation: ConversationSummary,
+  requestId: string,
+  note: string,
+): Promise<{ ciphertext: string; iv: string }> {
+  const key = await derivePeerKey(
+    identity,
+    conversation.id,
+    conversation.peer.publicKey,
+    'orbit-access-request-note-v1',
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv,
+      additionalData: encoder.encode(requestId),
+    },
+    key,
+    encoder.encode(note),
+  );
+  return { ciphertext: encodeBase64(ciphertext), iv: encodeBase64(iv.buffer) };
+}
+
+export async function decryptAccessRequestNote(
+  identity: DeviceIdentity,
+  conversation: ConversationSummary,
+  requestId: string,
+  ciphertext: string,
+  iv: string,
+): Promise<string> {
+  const key = await derivePeerKey(
+    identity,
+    conversation.id,
+    conversation.peer.publicKey,
+    'orbit-access-request-note-v1',
+  );
+  const plaintext = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: decodeBase64(iv),
+      additionalData: encoder.encode(requestId),
+    },
+    key,
+    decodeBase64(ciphertext),
+  );
+  return decoder.decode(plaintext);
+}

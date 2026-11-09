@@ -15,6 +15,8 @@ import { PreviewPane } from '../shared-folders/PreviewPane';
 import { PreviewSessionManager } from '../shared-folders/previewSession';
 import { registerDownload, updateDownloadProgress } from '../shared-folders/downloadStore';
 import { sanitizePathSegment } from '../shared-folders/downloadCore';
+import { PresenceIndicator } from './PresenceIndicator';
+import type { ClientAvailability, ClientPresenceStatus } from '../presenceStore';
 
 export type SharedFolderTimelineItem = SharedFolderRecord & {
   status: 'pending' | 'ready' | 'error' | 'revoked';
@@ -46,6 +48,9 @@ interface ConversationThreadProps {
   connection: OrbitConnectionState;
   deviceIdentityAvailable: boolean;
   peerBlocked: boolean;
+  peerPresenceStatus: ClientPresenceStatus;
+  availabilityByShare: Record<string, ClientAvailability>;
+  viewersByShare: Record<string, Array<{ userId: string; since: number }>>;
   refreshingPeerKey: boolean;
   fileSending: boolean;
   filePickerRef: RefObject<HTMLInputElement | null>;
@@ -98,6 +103,10 @@ interface ConversationThreadProps {
   onOfferFile: (file: File) => void;
   onShareFolder: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder, allowDownloads: boolean) => Promise<void>;
   onPreviewSignal: (signal: PreviewSignal) => void;
+  onShareViewing: (shareId: string, viewing: boolean) => void;
+  onRequestAccess: (shareId: string, kind: 'availability' | 'download_permission' | 'reshare') => void;
+  watchedShareIds: Set<string>;
+  onToggleWatch: (shareId: string) => void;
   onRevokeFolder: (id: string) => void;
   onReplyChange: (id: string | null) => void;
   onDraftChange: (value: string) => void;
@@ -127,12 +136,34 @@ function dayLabel(value: string): string {
   return date.toLocaleDateString([], { month: 'long', day: 'numeric', year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
 }
 
+function shareAvailabilityLabel(
+  status: SharedFolderTimelineItem['status'],
+  availability: ClientAvailability | undefined,
+  ownerName: string,
+  ownerOnline: boolean,
+): string {
+  if (status === 'revoked') return 'No longer shared';
+  if (status === 'pending') return 'Checking availability…';
+  if (!ownerOnline) return 'Owner offline';
+  if (!availability) return ownerOnline ? 'Checking availability…' : 'Owner offline';
+  switch (availability.state) {
+    case 'available': return 'Available';
+    case 'needs_permission': return `${ownerName} needs to re-allow folder access`;
+    case 'needs_reselect': return `${ownerName} needs to re-select the folder`;
+    case 'unavailable': return 'Sharing paused';
+    case 'revoked': return 'No longer shared';
+  }
+}
+
 export function ConversationThread({
   conversation,
   user,
   connection,
   deviceIdentityAvailable,
   peerBlocked,
+  peerPresenceStatus,
+  availabilityByShare,
+  viewersByShare,
   refreshingPeerKey,
   fileSending,
   filePickerRef,
@@ -185,6 +216,10 @@ export function ConversationThread({
   onOfferFile,
   onShareFolder,
   onPreviewSignal,
+  onShareViewing,
+  onRequestAccess,
+  watchedShareIds,
+  onToggleWatch,
   onRevokeFolder,
   onReplyChange,
   onDraftChange,
@@ -203,6 +238,9 @@ export function ConversationThread({
   >(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const viewerItem = threadMessages.find((item) => item.sharedFolder?.id === viewerShareId);
+  const viewerAvailability = viewerItem?.sharedFolder
+    ? availabilityByShare[viewerItem.sharedFolder.id]
+    : undefined;
   const previewEntry: SharedFolderEntry | undefined = viewerItem?.sharedFolder?.manifest?.entries
     .find((entry) => entry.id === previewEntryId && entry.k === 'f');
   const parentPath = (path: string) => {
@@ -215,6 +253,34 @@ export function ConversationThread({
       )
     : [];
   const previewSiblingIndex = previewSiblings.findIndex(({ id }) => id === previewEntry?.id);
+  useEffect(() => {
+    const shared = viewerItem?.sharedFolder;
+    if (!viewerShareId || !shared || shared.ownerId === user.id) return;
+    let hiddenTimer: number | null = null;
+    const sendViewing = () => {
+      if (document.visibilityState === 'visible') onShareViewing(viewerShareId, true);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenTimer = window.setTimeout(() => {
+          onShareViewing(viewerShareId, false);
+        }, 60_000);
+      } else {
+        if (hiddenTimer !== null) window.clearTimeout(hiddenTimer);
+        hiddenTimer = null;
+        sendViewing();
+      }
+    };
+    sendViewing();
+    const refresh = window.setInterval(sendViewing, 20_000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearInterval(refresh);
+      if (hiddenTimer !== null) window.clearTimeout(hiddenTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      onShareViewing(viewerShareId, false);
+    };
+  }, [onShareViewing, user.id, viewerItem?.sharedFolder, viewerShareId]);
   useEffect(() => {
     const shared = viewerItem?.sharedFolder
     if (!shared || shared.status !== 'ready' || shared.ownerId === user.id || !deviceIdentity) {
@@ -271,9 +337,10 @@ export function ConversationThread({
       <button className="orbit-thread-back" type="button" onClick={onBack} aria-label="Back to conversations">
         <OrbitIcon name="back" />
       </button>
-      <span className="orbit-avatar orbit-thread-avatar">{initials(conversation.peer.displayName)}</span>
+      <span className="orbit-avatar orbit-thread-avatar">{initials(conversation.peer.displayName)}<PresenceIndicator status={peerPresenceStatus} compact /></span>
       <div className="orbit-thread-person">
         <h1>{conversation.peer.displayName}</h1>
+        <PresenceIndicator status={peerPresenceStatus} />
       </div>
       <div className={`orbit-thread-actions${audioCall ? ' has-audio-call' : ''}`}>
         {audioCall
@@ -358,9 +425,20 @@ export function ConversationThread({
                 <span className="orbit-shared-folder-icon"><OrbitIcon name="tree" /></span>
                 <div>
                   <strong>{item.senderId === user.id ? 'You shared a folder' : `${conversation.peer.displayName} shared a folder`}</strong>
+                  <small className="orbit-share-availability" role="status">
+                    {shareAvailabilityLabel(
+                      item.sharedFolder.status,
+                      availabilityByShare[item.sharedFolder.id],
+                      conversation.peer.displayName,
+                      peerPresenceStatus !== 'offline',
+                    )}
+                  </small>
                   {item.sharedFolder.status === 'ready' && item.sharedFolder.manifest
                     ? <small>{item.sharedFolder.manifest.rootName} · {item.sharedFolder.fileCount?.toLocaleString()} files · {item.sharedFolder.folderCount?.toLocaleString()} folders · {formatFileSize(item.sharedFolder.totalSize ?? 0)}</small>
                     : <small>{item.sharedFolder.status === 'pending' ? 'Opening encrypted folder…' : item.sharedFolder.status === 'revoked' ? 'This folder is no longer shared' : "Couldn't open this shared folder"}</small>}
+                  {item.senderId === user.id && viewersByShare[item.sharedFolder.id]?.some(
+                    (viewer) => viewer.userId === conversation.peer.id,
+                  ) && <small>{conversation.peer.displayName} is browsing</small>}
                 </div>
               </div>
               {item.sharedFolder.status === 'pending' && <div className="orbit-folder-card-skeleton" aria-hidden="true"><span /><span /></div>}
@@ -368,9 +446,28 @@ export function ConversationThread({
                 <span>{item.sharedFolder.errorMessage ?? "Couldn't open this shared folder"}</span>
                 <button type="button" onClick={onRetryThread}>Retry</button>
               </div>}
-              {item.sharedFolder.status === 'revoked' && <p className="orbit-folder-card-revoked" role="status">This folder is no longer shared.</p>}
+              {item.sharedFolder.status === 'revoked' && <div className="orbit-folder-card-revoked" role="status">
+                <span>This folder is no longer shared.</span>
+                {item.senderId !== user.id && <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'reshare')}>Ask {conversation.peer.displayName} to share again</button>}
+              </div>}
               {item.sharedFolder.status === 'ready' && <div className="orbit-shared-folder-actions">
                 <button type="button" onClick={() => setViewerShareId(item.sharedFolder!.id)}>Open</button>
+                {item.senderId !== user.id && availabilityByShare[item.sharedFolder.id]?.state !== 'available' &&
+                  <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'availability')}>
+                    Ask {conversation.peer.displayName} to open it
+                  </button>}
+                {item.senderId !== user.id && <button
+                  type="button"
+                  aria-pressed={watchedShareIds.has(item.sharedFolder.id)}
+                  onClick={() => onToggleWatch(item.sharedFolder!.id)}
+                >
+                  {watchedShareIds.has(item.sharedFolder.id) ? 'Stop notifications' : 'Notify me when available'}
+                </button>}
+                {item.senderId !== user.id && availabilityByShare[item.sharedFolder.id]?.state === 'available' &&
+                  availabilityByShare[item.sharedFolder.id]?.downloads === false &&
+                  <button type="button" onClick={() => onRequestAccess(item.sharedFolder!.id, 'download_permission')}>
+                    Ask for download permission
+                  </button>}
                 {item.senderId === user.id && <button type="button" className="is-destructive" onClick={() => onRevokeFolder(item.sharedFolder!.id)}>Stop sharing</button>}
               </div>}
             </div> : item.kind === 'file' && item.file ? <div className="orbit-file-card">
@@ -562,17 +659,17 @@ export function ConversationThread({
       manifest={viewerItem.sharedFolder.manifest}
       invalidCount={viewerItem.sharedFolder.invalidCount ?? 0}
       onClose={() => setViewerShareId(null)}
-      previewDisabled={viewerItem.sharedFolder.ownerId === user.id}
+      previewDisabled={viewerItem.sharedFolder.ownerId === user.id || viewerAvailability?.state !== 'available'}
       onPreviewFile={(entryId) => setPreviewEntryId(entryId)}
       onDownloadFile={downloadSharedFile}
-      downloadDisabled={viewerItem.sharedFolder.ownerId === user.id || !deviceIdentity || !remoteDownloadAllowed || !downloadStarter}
+      downloadDisabled={viewerItem.sharedFolder.ownerId === user.id || !deviceIdentity || !remoteDownloadAllowed || !downloadStarter || viewerAvailability?.state !== 'available' || !viewerAvailability.downloads}
     />}
     {downloadError && <p className="orbit-download-error" role="alert">{downloadError}</p>}
     {viewerItem?.sharedFolder?.status === 'ready' &&
       viewerItem.sharedFolder.ownerId !== user.id &&
       previewEntry &&
       deviceIdentity && <PreviewPane
-        key={previewEntry.id}
+        key={`${previewEntry.id}:${viewerAvailability?.state ?? 'unknown'}:${viewerAvailability?.since ?? 0}`}
         shareId={viewerItem.sharedFolder.id}
         conversation={conversation}
         identity={deviceIdentity}
@@ -580,7 +677,9 @@ export function ConversationThread({
         previousEntry={previewSiblingIndex > 0 ? previewSiblings[previewSiblingIndex - 1] : undefined}
         nextEntry={previewSiblingIndex >= 0 ? previewSiblings[previewSiblingIndex + 1] : undefined}
         sessionManager={previewSessionManager}
-        onDownload={remoteDownloadAllowed && downloadStarter ? () => downloadSharedFile(previewEntry.id) : undefined}
+        onDownload={remoteDownloadAllowed && downloadStarter && viewerAvailability?.state === 'available' && viewerAvailability.downloads
+          ? () => downloadSharedFile(previewEntry.id)
+          : undefined}
         onSignal={onPreviewSignal}
         onNavigate={(entryId) => setPreviewEntryId(entryId)}
         onClose={() => setPreviewEntryId(null)}

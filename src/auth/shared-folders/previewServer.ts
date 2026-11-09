@@ -111,6 +111,7 @@ async function waitForBuffer(channel: RTCDataChannel, signal: AbortSignal): Prom
 export class PreviewServer {
   private readonly shares = new Map<string, OwnerShare>()
   private readonly sessions = new Map<string, OwnerSession>()
+  private readonly pausedShares = new Set<string>()
 
   constructor(private readonly options: PreviewServerOptions) {}
 
@@ -162,6 +163,33 @@ export class PreviewServer {
     if (!handle) return false
     const permission = await (handle as PreviewDirectoryHandle).requestPermission({ mode: "read" })
     return permission === "granted"
+  }
+
+  async availability(shareId: string): Promise<{
+    state: "available" | "needs_permission" | "needs_reselect" | "unavailable"
+    downloads: boolean
+  }> {
+    if (this.pausedShares.has(shareId)) return { state: "unavailable", downloads: false }
+    const share = this.shares.get(shareId)
+    if (!share) return { state: "needs_reselect", downloads: false }
+    if (share.fallbackFiles) {
+      return { state: "available", downloads: share.allowDownloads }
+    }
+    const handle = await getFolderHandle(shareId)
+    if (!handle) return { state: "needs_reselect", downloads: false }
+    const permission = await (handle as PreviewDirectoryHandle).queryPermission({ mode: "read" })
+    return permission === "granted"
+      ? { state: "available", downloads: share.allowDownloads }
+      : { state: "needs_permission", downloads: false }
+  }
+
+  setPaused(shareId: string, paused: boolean): void {
+    if (paused) this.pausedShares.add(shareId)
+    else this.pausedShares.delete(shareId)
+  }
+
+  isPaused(shareId: string): boolean {
+    return this.pausedShares.has(shareId)
   }
 
   setDownloadsAllowed(shareId: string, allowed: boolean): void {
@@ -233,6 +261,7 @@ export class PreviewServer {
 
   closeShare(shareId: string): void {
     this.shares.delete(shareId)
+    this.pausedShares.delete(shareId)
     forgetFallbackFiles(shareId)
     void deleteFolderHandle(shareId)
     for (const [key, session] of this.sessions) {

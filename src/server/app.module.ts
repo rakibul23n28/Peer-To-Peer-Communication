@@ -20,6 +20,7 @@ import { UsersModule } from "../modules/users/users.module.js"
 
 import { TurnModule } from "../modules/turn/turn.module.js"
 import { SharedFoldersModule } from "../modules/shared-folders/shared-folders.module.js"
+import { AccessRequestsModule } from "../modules/access-requests/access-requests.module.js"
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { SharedFoldersModule } from "../modules/shared-folders/shared-folders.mo
 
     FilesModule,
     SharedFoldersModule,
+    AccessRequestsModule,
 
     GatewayModule,
 

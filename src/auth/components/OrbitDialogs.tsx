@@ -1,6 +1,6 @@
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { OrbitConnectionState } from '../orbitSocket';
-import type { UserIdentity, UserSearchResult } from '../session';
+import type { PrivacySettings, UserIdentity, UserSearchResult } from '../session';
 import { initials } from './OrbitMark';
 import { OrbitIcon } from './OrbitIcon';
 
@@ -18,12 +18,20 @@ interface OrbitDialogsProps {
   searchError: string;
   loadingBlocks: boolean;
   blockedUsers: UserSearchResult[];
+  privacySettings: PrivacySettings;
+  privacySettingsBusy: boolean;
+  browserNotifications: boolean;
+  includeFolderNames: boolean;
+  searchIndexEnabled: boolean;
   onQueryChange: (value: string) => void;
   onOpenConversation: (person: UserSearchResult) => void;
   onClose: () => void;
   onCopyFingerprint: () => void;
   onRefreshBlocks: () => void;
   onUnblock: (id: string) => void;
+  onPrivacySettingsChange: (settings: PrivacySettings) => void;
+  onEnableBrowserNotifications: (enabled: boolean) => void;
+  onIncludeFolderNamesChange: (enabled: boolean) => void;
   onSignOut: () => void;
 }
 
@@ -48,12 +56,20 @@ export function OrbitDialogs({
   searchError,
   loadingBlocks,
   blockedUsers,
+  privacySettings,
+  privacySettingsBusy,
+  browserNotifications,
+  includeFolderNames,
+  searchIndexEnabled,
   onQueryChange,
   onOpenConversation,
   onClose,
   onCopyFingerprint,
   onRefreshBlocks,
   onUnblock,
+  onPrivacySettingsChange,
+  onEnableBrowserNotifications,
+  onIncludeFolderNamesChange,
   onSignOut,
 }: OrbitDialogsProps) {
   if (!dialog) return null;
@@ -87,6 +103,60 @@ export function OrbitDialogs({
         <p>Account and device details currently available for this session.</p>
         <dl className="orbit-settings-list"><div><dt>Username</dt><dd>@{user.username}</dd></div><div><dt>Active key version</dt><dd>{user.keyVersion}</dd></div><div><dt>Device key</dt><dd>Verified against the active server key</dd></div><div><dt>Connection</dt><dd>{connectionLabel(connection)}</dd></div></dl>
         <button className="orbit-primary-action" type="button" onClick={onCopyFingerprint}>Copy device fingerprint <span aria-hidden="true">↗</span></button>
+        <section className="orbit-privacy-settings" aria-labelledby="orbit-privacy-title">
+          <h3 id="orbit-privacy-title">Privacy & presence</h3>
+          <label>
+            <input
+              type="checkbox"
+              checked={!privacySettings.presenceVisible}
+              disabled={privacySettingsBusy}
+              onChange={(event) => onPrivacySettingsChange({
+                ...privacySettings,
+                presenceVisible: !event.target.checked,
+              })}
+            />
+            <span><strong>Appear offline</strong><small>Others see you as offline and can't start new previews or downloads until you turn this off. Transfers already in progress continue.</small><small>Who can see this: your conversation partners see offline while enabled.</small></span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={privacySettings.showViewingActivity}
+              disabled={privacySettingsBusy}
+              onChange={(event) => onPrivacySettingsChange({
+                ...privacySettings,
+                showViewingActivity: event.target.checked,
+              })}
+            />
+            <span><strong>Show when I'm viewing shared folders</strong><small>Actual file reads are visible to the folder owner because their device serves the data.</small><small>Who can see this: only the owner of the folder you open.</small></span>
+          </label>
+          <label className="orbit-privacy-select">
+            <span><strong>Accept access requests</strong><small>Who can send: contacts with an existing conversation.</small></span>
+            <select
+              value={privacySettings.acceptAccessRequests}
+              disabled={privacySettingsBusy}
+              onChange={(event) => onPrivacySettingsChange({
+                ...privacySettings,
+                acceptAccessRequests: event.target.value as PrivacySettings['acceptAccessRequests'],
+              })}
+            >
+              <option value="contacts">Contacts</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" checked={browserNotifications} onChange={(event) => onEnableBrowserNotifications(event.target.checked)} />
+            <span><strong>Browser notifications</strong><small>Notifications work only while Orbit is open in a tab. No push notification is sent when Orbit is closed.</small></span>
+          </label>
+          <label>
+            <input type="checkbox" checked={includeFolderNames} onChange={(event) => onIncludeFolderNamesChange(event.target.checked)} />
+            <span><strong>Include folder names in notifications</strong><small>Names are local-only and may appear on your lock screen. Off by default.</small></span>
+          </label>
+          <label>
+            <input type="checkbox" checked={searchIndexEnabled} disabled />
+            <span><strong>Index shared folders for search</strong><small>Local shared-folder search is not available yet. No search index is uploaded.</small></span>
+          </label>
+          <p><strong>What the server can see:</strong> ephemeral online/away/offline state, each active share’s availability and download-permission flag, a per-share viewing boolean, privacy settings, and access-request IDs, kind, status, timestamps, and optional opaque encrypted notes. It never sees folder or file names, paths, contents, which file is being read, transfer byte counts or speeds, or search queries.</p>
+        </section>
         <div className="orbit-blocked-list">
           <div className="orbit-blocked-list-heading"><strong>Blocked contacts</strong><button type="button" onClick={onRefreshBlocks}>Refresh</button></div>
           {loadingBlocks ? <p>Loading blocked contacts…</p> : blockedUsers.length === 0

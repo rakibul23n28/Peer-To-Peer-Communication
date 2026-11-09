@@ -5,6 +5,7 @@ import { AuthService } from "../auth/auth.service.js"
 import { notFound } from "../shared/http-error.filter.js"
 
 import { UsersRepository } from "./users.repository.js"
+import { PrivacySettingsEvents } from "../presence/privacy-settings-events.js"
 
 @Injectable()
 export class UsersService {
@@ -12,6 +13,7 @@ export class UsersService {
     private readonly users: UsersRepository,
 
     private readonly auth: AuthService,
+    private readonly privacyEvents: PrivacySettingsEvents,
   ) {}
 
   search(query: string) {
@@ -32,6 +34,21 @@ export class UsersService {
     return result
   }
 
+  privacySettings(userId: string) {
+    return this.users.privacySettings(userId)
+  }
+
+  updatePrivacySettings(userId: string, input: {
+    presenceVisible: boolean
+    showViewingActivity: boolean
+    acceptAccessRequests: "contacts" | "off"
+  }) {
+    return this.users.updatePrivacySettings(userId, input).then((settings) => {
+      this.privacyEvents.publish(userId)
+      return settings
+    })
+  }
+
   me(userId: string) {
     return this.auth.getIdentity(userId)
   }
@@ -47,3 +64,4 @@ export class UsersService {
 
 Inject(UsersRepository)(UsersService, undefined, 0)
 Inject(AuthService)(UsersService, undefined, 1)
+Inject(PrivacySettingsEvents)(UsersService, undefined, 2)

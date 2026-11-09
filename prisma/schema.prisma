@@ -59,6 +59,9 @@ model User {
   sharedFolders  SharedFolder[]
   blocksSent     Block[]          @relation("blocker")
   blocksReceived Block[]          @relation("blocked")
+  privacySettings UserPrivacySettings?
+  accessRequestsIncoming AccessRequest[] @relation("access_request_owner")
+  accessRequestsOutgoing AccessRequest[] @relation("access_request_requester")
 
   @@map("users")
 }
@@ -107,6 +110,7 @@ model Conversation {
   messages  Message[]
   files     FileTransfer[]
   sharedFolders SharedFolder[]
+  accessRequests AccessRequest[]
 
   @@unique([userA, userB])
   @@index([userB])
@@ -212,9 +216,45 @@ model SharedFolder {
   revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   owner          User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  accessRequests AccessRequest[]
 
   @@index([conversationId, createdAt])
   @@map("shared_folders")
+}
+
+model UserPrivacySettings {
+  userId               String   @id @map("user_id") @db.Uuid
+  presenceVisible      Boolean  @default(true) @map("presence_visible")
+  showViewingActivity  Boolean  @default(true) @map("show_viewing_activity")
+  acceptAccessRequests String   @default("contacts") @map("accept_access_requests") @db.VarChar(16)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_privacy_settings")
+}
+
+model AccessRequest {
+  id             String        @id @default(uuid()) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  shareId        String?       @map("share_id") @db.Uuid
+  requesterId    String        @map("requester_id") @db.Uuid
+  ownerId        String        @map("owner_id") @db.Uuid
+  kind           String        @db.VarChar(32)
+  noteCiphertext Bytes?        @map("note_ciphertext")
+  noteIv         Bytes?        @map("note_iv")
+  status         String        @default("pending") @db.VarChar(16)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt     DateTime?     @map("resolved_at") @db.Timestamptz(6)
+  expiresAt      DateTime      @map("expires_at") @db.Timestamptz(6)
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  share          SharedFolder? @relation(fields: [shareId], references: [id], onDelete: SetNull)
+  requester      User          @relation("access_request_requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  owner          User          @relation("access_request_owner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status, createdAt])
+  @@index([requesterId, status, createdAt])
+  @@index([shareId, status])
+  @@map("access_requests")
 }
 
 model Block {

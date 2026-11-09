@@ -51,6 +51,13 @@ export interface UserSearchResult {
   displayName: string
 }
 
+export interface PublicKeyResponse {
+  id: string
+  publicKey: string
+  fingerprint: string
+  keyVersion: number
+}
+
 export interface EncryptedMessage {
   id: string
   conversationId: string
@@ -84,13 +91,6 @@ export interface EncryptedMessage {
     height: number | null
     status: 'offered' | 'accepted' | 'transferring' | 'received' | 'declined' | 'cancelled' | 'failed' | 'expired'
   } | null
-}
-
-export interface PublicKeyResponse {
-  id: string
-  publicKey: string
-  fingerprint: string
-  keyVersion: number
 }
 
 export interface TurnIceConfiguration {
@@ -436,6 +436,10 @@ export function getMessages(
 
 export function getUserPublicKey(userId: string, keyVersion: number): Promise<PublicKeyResponse> {
   return apiRequest(`/users/${encodeURIComponent(userId)}/public-key?version=${keyVersion}`)
+}
+
+export function getUserPublicKeys(userId: string): Promise<PublicKeyResponse[]> {
+  return apiRequest(`/users/${encodeURIComponent(userId)}/public-keys`)
 }
 
 export function updateFileStatus(

@@ -56,6 +56,26 @@ export class UsersRepository {
       keyVersion: key.keyVersion,
     }
   }
+
+  async publicKeys(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: {
+        id: true,
+        keys: {
+          orderBy: { keyVersion: "desc" },
+          select: { publicKey: true, fingerprint: true, keyVersion: true },
+        },
+      },
+    })
+    if (!user || user.keys.length === 0) return null
+    return user.keys.map((key) => ({
+      id: user.id,
+      publicKey: Buffer.from(key.publicKey).toString("base64"),
+      fingerprint: key.fingerprint,
+      keyVersion: key.keyVersion,
+    }))
+  }
 }
 
 Inject(PrismaService)(UsersRepository, undefined, 0)

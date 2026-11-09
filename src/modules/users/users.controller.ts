@@ -49,6 +49,11 @@ export class UsersController {
     return this.users.publicKey(id, keyVersion)
   }
 
+  publicKeys(id: string) {
+    z.string().uuid().parse(id)
+    return this.users.publicKeys(id)
+  }
+
   me(request: AuthRequest) {
     return this.users.me(request.userId)
   }
@@ -86,6 +91,10 @@ Get(":id/public-key")(usersController, "publicKey", Object.getOwnPropertyDescrip
 UseGuards(AuthGuard)(usersController, "publicKey", Object.getOwnPropertyDescriptor(usersController, "publicKey")!)
 Param("id")(usersController, "publicKey", 0)
 Query("version")(usersController, "publicKey", 1)
+
+Get(":id/public-keys")(usersController, "publicKeys", Object.getOwnPropertyDescriptor(usersController, "publicKeys")!)
+UseGuards(AuthGuard)(usersController, "publicKeys", Object.getOwnPropertyDescriptor(usersController, "publicKeys")!)
+Param("id")(usersController, "publicKeys", 0)
 
 Get("me")(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)
 UseGuards(AuthGuard)(usersController, "me", Object.getOwnPropertyDescriptor(usersController, "me")!)

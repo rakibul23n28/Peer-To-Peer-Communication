@@ -26,6 +26,12 @@ export class UsersService {
     return result
   }
 
+  async publicKeys(userId: string) {
+    const result = await this.users.publicKeys(userId)
+    if (!result) throw notFound("User or public key not found")
+    return result
+  }
+
   me(userId: string) {
     return this.auth.getIdentity(userId)
   }

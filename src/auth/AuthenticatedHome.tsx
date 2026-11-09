@@ -7,7 +7,7 @@ import {
   createFileOffer,
   deleteMessage,
   editMessage,
-  getUserPublicKey,
+  getUserPublicKeys,
   getMessages,
   getConversations,
   listBlocks,
@@ -105,6 +105,35 @@ interface DecryptedWithKeyVersions {
   plaintext: string;
   identity: DeviceIdentity;
   peerPublicKey: string;
+}
+
+function sharedFolderTimelineMessage(
+  record: SharedFolderRecord,
+  userId: string,
+  peerName: string,
+): ThreadMessage {
+  return {
+    id: `shared-folder:${record.id}`,
+    conversationId: record.conversationId,
+    senderId: record.ownerId,
+    clientMsgId: `shared-folder:${record.id}`,
+    seq: "0",
+    ciphertext: null,
+    iv: null,
+    keyVersion: 1,
+    senderKeyVersion: 1,
+    recipientKeyVersion: 1,
+    replyToId: null,
+    kind: "shared_folder",
+    createdAt: record.createdAt,
+    editedAt: null,
+    deletedAt: null,
+    receipts: [],
+    reactions: [],
+    plaintext: record.ownerId === userId ? "You shared a folder" : `${peerName} shared a folder`,
+    decryptedReactions: [],
+    sharedFolder: { ...record, status: "pending" },
+  }
 }
 
 function isOutboxMessage(value: unknown): value is OutboxMessage {
@@ -309,7 +338,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   const flushingMessagesRef = useRef(new Set<string>());
   const attemptedMessagesRef = useRef(new Set<string>());
   const threadLoadIdRef = useRef(0);
+  const threadRefreshInFlightRef = useRef(false);
   const peerPublicKeysRef = useRef(new Map<string, Promise<string>>());
+  const peerPublicKeyHistoryRef = useRef(new Map<string, Promise<Awaited<ReturnType<typeof getUserPublicKeys>>>>());
   const fileTransfersRef = useRef(new Map<string, PeerFileTransfer>());
   const sourceFilesRef = useRef(new Map<string, File>());
   const fileInfoRef = useRef(new Map<string, { size: number; mime: string; sha256: string; recipientKeyVersion: number }>());
@@ -682,11 +713,20 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     const cacheKey = `${conversation.peer.id}:${keyVersion}`;
     let keyRequest = peerPublicKeysRef.current.get(cacheKey);
     if (!keyRequest) {
-      keyRequest = getUserPublicKey(conversation.peer.id, keyVersion).then((response) => {
-        if (response.keyVersion !== keyVersion) {
-          throw new Error(`The contact's encryption key version ${keyVersion} is unavailable.`);
-        }
-        return response.publicKey;
+      let historyRequest = peerPublicKeyHistoryRef.current.get(conversation.peer.id);
+      if (!historyRequest) {
+        historyRequest = getUserPublicKeys(conversation.peer.id);
+        peerPublicKeyHistoryRef.current.set(conversation.peer.id, historyRequest);
+        void historyRequest.catch(() => {
+          if (peerPublicKeyHistoryRef.current.get(conversation.peer.id) === historyRequest) {
+            peerPublicKeyHistoryRef.current.delete(conversation.peer.id);
+          }
+        });
+      }
+      keyRequest = historyRequest.then((keys) => {
+        const key = keys.find((candidate) => candidate.keyVersion === keyVersion);
+        if (!key) throw new Error(`The contact's encryption key version ${keyVersion} is unavailable.`);
+        return key.publicKey;
       });
       peerPublicKeysRef.current.set(cacheKey, keyRequest);
       void keyRequest.catch(() => {
@@ -707,21 +747,36 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       .filter((saved, index, all) =>
         all.findIndex((candidate) => candidate.fingerprint === saved.fingerprint) === index,
       );
-    const currentPeerVersion = conversation.peer.keyVersion;
-    const peerVersions = Array.from(
-      { length: Math.min(currentPeerVersion, 64) },
-      (_unused, index) => currentPeerVersion - index,
+    let publicKeyHistory = peerPublicKeyHistoryRef.current.get(conversation.peer.id);
+    if (!publicKeyHistory) {
+      publicKeyHistory = getUserPublicKeys(conversation.peer.id);
+      peerPublicKeyHistoryRef.current.set(conversation.peer.id, publicKeyHistory);
+      void publicKeyHistory.catch(() => {
+        if (peerPublicKeyHistoryRef.current.get(conversation.peer.id) === publicKeyHistory) {
+          peerPublicKeyHistoryRef.current.delete(conversation.peer.id);
+        }
+      });
+    }
+    const publicKeys = await publicKeyHistory;
+    const peerCandidates = [
+      { keyVersion: conversation.peer.keyVersion, publicKey: conversation.peer.publicKey },
+      ...publicKeys.map(({ keyVersion, publicKey }) => ({ keyVersion, publicKey })),
+    ].filter((candidate, index, all) =>
+      Number.isSafeInteger(candidate.keyVersion) &&
+      candidate.keyVersion > 0 &&
+      all.findIndex((other) =>
+        other.keyVersion === candidate.keyVersion && other.publicKey === candidate.publicKey,
+      ) === index,
     );
     let lastFailure: unknown;
 
     for (const localIdentity of identities) {
-      for (const version of peerVersions) {
+      for (const { publicKey: peerPublicKey } of peerCandidates) {
         try {
-          const publicKey = await peerPublicKeyForVersion(conversation, version);
           const key = await derivePeerKey(
             localIdentity,
             conversation.id,
-            publicKey,
+            peerPublicKey,
             'orbit-shared-folder-v1',
           );
           return await decryptFolderManifest(record, key, conversation.id, record.id);
@@ -736,7 +791,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         ? lastFailure.message
         : "Couldn't decrypt with the saved keys. Ask the owner to reshare after checking both accounts' encryption keys.",
     );
-  }, [peerPublicKeyForVersion, user.id]);
+  }, [user.id]);
 
   const decryptWithAvailableKeyVersions = useCallback(async (
     identity: DeviceIdentity,
@@ -1017,9 +1072,38 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
 
   const refreshThread = useCallback(async (includeSharedFolders = false) => {
     const conversation = conversationsRef.current.find(({ id }) => id === selectedId);
-    if (!conversation || !deviceIdentity) return;
+    if (!conversation || !deviceIdentity || threadRefreshInFlightRef.current) return;
+    threadRefreshInFlightRef.current = true;
     const loadId = ++threadLoadIdRef.current;
     try {
+      const sharedFolderRecordsPromise = includeSharedFolders
+        ? listSharedFolders(conversation.id)
+        : Promise.resolve([] as SharedFolderRecord[]);
+      if (includeSharedFolders) {
+        void sharedFolderRecordsPromise.then((records) => {
+          if (loadId !== threadLoadIdRef.current ||
+            historyConversationRef.current !== conversation.id) return;
+          setThreadMessages((current) => {
+            const messages = new Map(current.map((item) => [item.id, item]));
+            for (const record of records) {
+              const placeholder = sharedFolderTimelineMessage(
+                record,
+                user.id,
+                conversation.peer.displayName,
+              );
+              if (!messages.has(placeholder.id)) messages.set(placeholder.id, placeholder);
+            }
+            return [...messages.values()].sort((left, right) =>
+              new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+            );
+          });
+        }).catch((error: unknown) => {
+          if (loadId === threadLoadIdRef.current &&
+            historyConversationRef.current === conversation.id) {
+            setThreadError(error instanceof Error ? error.message : "Could not load shared folders.");
+          }
+        });
+      }
       const storageKey = `orbit-outbox:${user.id}`;
       const outbox = readOutbox(storageKey);
       setOutboxCount(outbox.length);
@@ -1072,31 +1156,13 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       const decryptedResults = await decryptMessagePage(response.messages, conversation, deviceIdentity);
       if (loadId !== threadLoadIdRef.current || historyConversationRef.current !== conversation.id) return;
       const decrypted = decryptedResults.map(({ message }) => message);
-      const sharedFolderRecords = includeSharedFolders
-        ? await listSharedFolders(conversation.id)
-        : [];
+      const sharedFolderRecords = await sharedFolderRecordsPromise;
       const folderMessages = await Promise.all(sharedFolderRecords.map(async (record) => {
-        const baseMessage: ThreadMessage = {
-          id: `shared-folder:${record.id}`,
-          conversationId: record.conversationId,
-          senderId: record.ownerId,
-          clientMsgId: `shared-folder:${record.id}`,
-          seq: "0",
-          ciphertext: null,
-          iv: null,
-          keyVersion: 1,
-          senderKeyVersion: 1,
-          recipientKeyVersion: 1,
-          replyToId: null,
-          kind: 'shared_folder',
-          createdAt: record.createdAt,
-          editedAt: null,
-          deletedAt: null,
-          receipts: [],
-          reactions: [],
-          plaintext: record.ownerId === user.id ? 'You shared a folder' : `${conversation.peer.displayName} shared a folder`,
-          decryptedReactions: [],
-        };
+        const baseMessage = sharedFolderTimelineMessage(
+          record,
+          user.id,
+          conversation.peer.displayName,
+        );
         if (!conversation.peer.keyAvailable) {
           return {
             ...baseMessage,
@@ -1213,6 +1279,8 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       if (loadId === threadLoadIdRef.current) {
         setThreadError(error instanceof Error ? error.message : 'Could not load this conversation.');
       }
+    } finally {
+      threadRefreshInFlightRef.current = false;
     }
   }, [decryptMessagePage, deviceIdentity, selectedId, user.id]);
 
@@ -1266,7 +1334,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     lastAutoScrollTokenRef.current = '';
     if (!selectedId) return;
     void refreshThread(true);
-    const interval = window.setInterval(() => void refreshThread(), 4000);
+    const interval = window.setInterval(() => void refreshThread(true), 4000);
     return () => window.clearInterval(interval);
   }, [refreshThread, selectedId]);
 
@@ -1829,12 +1897,24 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         includeHidden: picked.includeHidden ?? false,
         allowDownloads,
       })
-      await createSharedFolder(conversation.id, {
+      const createdRecord = await createSharedFolder(conversation.id, {
         id: shareId,
         ciphertext: encrypted.ciphertext,
         iv: encrypted.iv,
         formatVersion: 1,
         compressed: encrypted.compressed,
+      })
+      setThreadMessages((current) => {
+        const message = sharedFolderTimelineMessage(
+          createdRecord,
+          user.id,
+          conversation.peer.displayName,
+        )
+        return current.some(({ id }) => id === message.id)
+          ? current
+          : [...current, message].sort((left, right) =>
+            new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+          )
       })
       await previewServer.registerShare({
         shareId,

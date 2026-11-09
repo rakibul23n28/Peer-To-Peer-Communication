@@ -6534,3 +6534,364 @@
     max-width: 96%;
   }
 }
+
+.auth-screen:not(.auth-screen--auth) {
+  gap: clamp(24px, 4vw, 64px);
+  padding: clamp(20px, 4vw, 60px);
+}
+
+.auth-screen:not(.auth-screen--auth) .auth-story {
+  min-height: min(620px, calc(100dvh - 2 * clamp(20px, 4vw, 60px)));
+}
+
+.auth-screen:not(.auth-screen--auth) .story-visual {
+  width: min(100%, 320px);
+}
+
+.auth-screen:not(.auth-screen--auth) .story-copy h2 {
+  margin-block: 12px 8px;
+  font-size: clamp(32px, 3.7vw, 50px);
+}
+
+.auth-screen:not(.auth-screen--auth) .story-copy > p:last-child {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-screen:not(.auth-screen--auth) .story-footer {
+  padding-top: 16px;
+}
+
+.auth-screen .auth-card {
+  width: min(100%, 460px);
+  padding: clamp(24px, 3.2vw, 38px);
+  border-radius: 18px;
+}
+
+.auth-screen .auth-card h1 {
+  margin: 24px 0 8px;
+}
+
+.auth-screen .auth-card > p {
+  margin-block: 6px 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.auth-screen .auth-card form {
+  gap: 7px;
+  margin-top: 20px;
+}
+
+.auth-screen .auth-card label {
+  margin-top: 6px;
+}
+
+.auth-screen .auth-card input {
+  min-height: 46px;
+  padding-block: 10px;
+  border-radius: 10px;
+}
+
+.auth-screen .auth-card .primary-button {
+  min-height: 48px;
+  margin-top: 8px;
+}
+
+.auth-screen .auth-card .auth-switch {
+  margin-top: 11px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-header {
+  min-height: 62px;
+  gap: 8px;
+  padding: 9px 13px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-content {
+  padding: 12px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-person {
+  padding: 4px 6px 13px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-avatar {
+  width: 46px;
+  height: 46px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-person h3 {
+  margin-top: 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-status {
+  margin-top: 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-section {
+  padding-block: 11px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-section > h3 {
+  margin-bottom: 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-results {
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.orbit-shell[data-appearance] .orbit-details-results button {
+  padding: 7px 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-fingerprint {
+  gap: 6px;
+  padding: 9px;
+}
+
+.orbit-shell[data-appearance] .orbit-appearance-options {
+  gap: 5px;
+}
+
+.orbit-shell[data-appearance] .orbit-appearance-option {
+  min-height: 40px;
+  padding: 6px 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-settings-list {
+  margin-block: 14px;
+}
+
+.orbit-shell[data-appearance] .orbit-settings-list > div {
+  gap: 10px;
+  padding-block: 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-blocked-list {
+  gap: 6px;
+  margin-block: 13px;
+  padding: 9px;
+}
+
+.orbit-shell[data-appearance] .orbit-blocked-contact {
+  gap: 8px;
+  padding-block: 5px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog-backdrop {
+  padding: 14px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog {
+  width: min(100%, 440px);
+  max-height: min(680px, calc(100dvh - 28px));
+  padding: 20px;
+  border-radius: 15px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog-close {
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog > h2 {
+  margin: 10px 38px 6px 0;
+  font-size: clamp(22px, 3vw, 27px);
+}
+
+.orbit-shell[data-appearance] .orbit-dialog > p {
+  margin: 0 0 10px;
+  font-size: 10px;
+}
+
+.orbit-shell[data-appearance] .orbit-search-input-wrap,
+.orbit-shell[data-appearance] .orbit-dialog input {
+  min-height: 40px;
+}
+
+.orbit-shell[data-appearance] .orbit-search-results button {
+  min-height: 46px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog .orbit-primary-action {
+  margin-top: 8px;
+}
+
+.orbit-shell[data-appearance] .orbit-dialog-signout {
+  margin-top: 11px;
+}
+
+.orbit-shell[data-appearance] .orbit-toast,
+.orbit-shell[data-appearance] .orbit-action-error {
+  right: 16px;
+  bottom: 16px;
+  padding: 9px 12px;
+}
+
+.orbit-shell[data-appearance] .orbit-empty-state {
+  gap: 9px;
+  padding: 20px 16px;
+}
+
+.orbit-shell[data-appearance] .orbit-empty-state > p {
+  font-size: 15px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-dialog,
+.orbit-shell[data-appearance] .orbit-folder-viewer {
+  border-radius: 15px;
+  box-shadow: 0 14px 40px #00000020;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-dialog {
+  gap: 10px;
+  padding: 16px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-dialog h2,
+.orbit-shell[data-appearance] .orbit-folder-viewer h2 {
+  font-size: clamp(19px, 3vw, 23px);
+}
+
+.orbit-shell[data-appearance] .orbit-folder-summary {
+  gap: 3px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-preview-list {
+  max-height: 150px;
+  gap: 2px;
+  padding-block: 7px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-privacy {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-viewer {
+  width: min(100%, 760px);
+  padding: 14px;
+}
+
+.orbit-shell[data-appearance] .orbit-folder-tree-scroll {
+  height: min(54dvh, 460px);
+  border-radius: 10px;
+}
+
+.orbit-shell[data-appearance] .orbit-preview-pane {
+  width: min(100%, 1000px);
+  height: min(800px, 92dvh);
+  border-radius: 15px;
+  box-shadow: 0 18px 56px #00000032;
+}
+
+.orbit-shell[data-appearance] .orbit-preview-header {
+  min-height: 64px;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.orbit-shell[data-appearance] .orbit-preview-progress {
+  min-height: 26px;
+  padding-inline: 12px;
+}
+
+.orbit-shell[data-appearance] .orbit-preview-content {
+  padding: 9px;
+}
+
+@media (max-width: 900px) {
+  .auth-screen:not(.auth-screen--auth) {
+    gap: 20px;
+    padding: 24px;
+  }
+
+  .auth-screen:not(.auth-screen--auth) .story-visual {
+    width: min(100%, 250px);
+  }
+}
+
+@media (max-width: 680px) {
+  .auth-screen:not(.auth-screen--auth) {
+    gap: 14px;
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  }
+
+  .auth-screen:not(.auth-screen--auth) .auth-story {
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .auth-screen .auth-card {
+    padding: 20px 16px;
+    border-radius: 15px;
+  }
+
+  .auth-screen .auth-card h1 {
+    margin-top: 15px;
+    font-size: 26px;
+  }
+
+  .auth-screen .auth-card form {
+    margin-top: 15px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-details-header {
+    min-height: 56px;
+    padding: 7px 10px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-details-content {
+    padding: 10px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-dialog-backdrop {
+    padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+  }
+
+  .orbit-shell[data-appearance] .orbit-dialog {
+    max-height: calc(100dvh - 16px);
+    padding: 18px 15px;
+    border-radius: 14px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-dialog,
+  .orbit-shell[data-appearance] .orbit-folder-viewer {
+    gap: 8px;
+    padding: max(12px, env(safe-area-inset-top)) 11px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-tree-scroll {
+    height: auto;
+  }
+
+  .orbit-shell[data-appearance] .orbit-preview-pane {
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .orbit-shell[data-appearance] .orbit-preview-header {
+    min-height: 58px;
+    padding: 7px 9px;
+  }
+}
+
+@media (max-width: 375px) {
+  .auth-screen .auth-card {
+    padding-inline: 14px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-details-panel {
+    right: 6px;
+    left: 6px;
+    width: auto;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer {
+    padding-inline: 9px;
+  }
+}

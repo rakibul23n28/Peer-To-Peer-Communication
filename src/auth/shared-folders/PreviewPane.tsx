@@ -22,6 +22,7 @@ interface PreviewPaneProps {
   previousEntry?: SharedFolderEntry
   nextEntry?: SharedFolderEntry
   sessionManager: PreviewSessionManager
+  onDownload?: () => void
   onSignal: (signal: PreviewSignal) => void
   onNavigate: (entryId: number) => void
   onClose: () => void
@@ -55,6 +56,7 @@ export function PreviewPane({
   previousEntry,
   nextEntry,
   sessionManager,
+  onDownload,
   onSignal,
   onNavigate,
   onClose,
@@ -370,6 +372,7 @@ export function PreviewPane({
         </span>
         {previousEntry && <button type="button" aria-label="Previous file in this folder" onClick={() => onNavigate(previousEntry.id)}>Previous</button>}
         {nextEntry && <button type="button" aria-label="Next file in this folder" onClick={() => onNavigate(nextEntry.id)}>Next</button>}
+        {onDownload && <button type="button" onClick={onDownload}>Download</button>}
         <button type="button" className="orbit-folder-close" aria-label="Close preview" onClick={onClose}><OrbitIcon name="close" /></button>
       </header>
       <div className="orbit-preview-progress" aria-label="Preview transfer progress">

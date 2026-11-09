@@ -33,7 +33,11 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin || !url.pathname.startsWith("/__preview/")) return;
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname === "/__preview/sw.js" ||
+    !url.pathname.startsWith("/__preview/")
+  ) return;
   event.respondWith(handlePreviewRequest(event.request, event.clientId));
 });
 
@@ -72,7 +76,8 @@ async function handlePreviewRequest(request, clientId) {
     return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
-  const range = parsePreviewRange(request.headers.get("Range"), entry.size, WINDOW_BYTES);
+  const rangeHeader = request.headers.get("Range");
+  const range = parsePreviewRange(rangeHeader, entry.size, WINDOW_BYTES);
   if (!range) {
     return new Response(null, {
       status: 416,
@@ -124,10 +129,12 @@ async function handlePreviewRequest(request, clientId) {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== range.end - range.start) {
       return new Response(null, { status: 502, headers: { "Cache-Control": "no-store" } });
     }
-    return new Response(bytes, {
-      status: 206,
-      headers: previewRangeHeaders(range.start, range.end, entry.size, entry.mime),
-    });
+    const headers = previewRangeHeaders(range.start, range.end, entry.size, entry.mime);
+    if (!rangeHeader && range.start === 0 && range.end === entry.size) {
+      headers.delete("Content-Range");
+      return new Response(bytes, { status: 200, headers });
+    }
+    return new Response(bytes, { status: 206, headers });
   } catch {
     return new Response(null, {
       status: 503,

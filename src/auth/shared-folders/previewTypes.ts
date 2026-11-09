@@ -11,7 +11,8 @@ export interface PreviewDescriptor {
 const textExtensions = new Set([
   "txt", "md", "markdown", "log", "csv", "tsv", "json", "jsonl", "yaml", "yml",
   "xml", "html", "css", "js", "jsx", "ts", "tsx", "py", "go", "rs", "java",
-  "c", "h", "cpp", "hpp", "sh", "sql", "toml", "ini", "conf",
+  "c", "h", "cpp", "hpp", "sh", "sql", "toml", "ini", "conf", "tex", "bib",
+  "rst", "mdx", "properties", "env", "lock",
 ])
 
 const imageMime: Record<string, string> = {

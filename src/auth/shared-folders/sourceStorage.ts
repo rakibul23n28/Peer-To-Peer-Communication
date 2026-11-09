@@ -2,8 +2,16 @@ import Dexie, { type Table } from "dexie"
 
 interface StoredFolderHandle {
   shareId: string
-  handle: FileSystemDirectoryHandle
+  handle?: FileSystemDirectoryHandle
   savedAt: number
+  excludedDirectories?: string[]
+  includeHidden?: boolean
+}
+
+export interface StoredFolderSelection {
+  excludedDirectories: string[]
+  includeHidden: boolean
+  allowDownloads?: boolean
 }
 
 class SharedFolderHandleDatabase extends Dexie {
@@ -34,7 +42,25 @@ export async function saveFolderHandle(
   shareId: string,
   handle: FileSystemDirectoryHandle,
 ): Promise<void> {
-  await database.handles.put({ shareId, handle, savedAt: Date.now() })
+  const existing = await database.handles.get(shareId)
+  await database.handles.put({ ...existing, shareId, handle, savedAt: Date.now() })
+}
+
+export async function saveFolderSelection(
+  shareId: string,
+  selection: StoredFolderSelection,
+): Promise<void> {
+  const existing = await database.handles.get(shareId)
+  await database.handles.put({ ...existing, shareId, ...selection, savedAt: Date.now() })
+}
+
+export async function getFolderSelection(shareId: string): Promise<StoredFolderSelection | null> {
+  const stored = await database.handles.get(shareId)
+  if (!stored || !stored.excludedDirectories || stored.includeHidden === undefined) return null
+  return {
+    excludedDirectories: stored.excludedDirectories,
+    includeHidden: stored.includeHidden,
+  }
 }
 
 export async function getFolderHandle(shareId: string): Promise<FileSystemDirectoryHandle | null> {

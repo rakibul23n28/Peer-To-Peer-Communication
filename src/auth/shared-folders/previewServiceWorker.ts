@@ -22,7 +22,7 @@ function randomToken(): string {
 async function waitForController(): Promise<ServiceWorker> {
   if (!("serviceWorker" in navigator)) throw new Error("Streaming previews are not available in this browser.")
   const registration = await navigator.serviceWorker.register("/__preview/sw.js", {
-    scope: "/__preview/",
+    scope: "/",
     type: "module",
     updateViaCache: "none",
   })

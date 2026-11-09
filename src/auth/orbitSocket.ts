@@ -260,7 +260,9 @@ export function startOrbitSocket() {
   retryTimer = null;
   attempt = 0;
   notify('idle');
-  void connect(currentGeneration);
+  queueMicrotask(() => {
+    if (!stopped && currentGeneration === generation) void connect(currentGeneration);
+  });
   return () => {
     if (owner !== ownerId) return;
     ownerId += 1;

@@ -14,7 +14,23 @@ export interface PickedFolder {
   entries: SharedFolderEntry[]
   handle?: LocalFolderDirectoryHandle
   filesByPath?: Map<string, File>
+  excludedDirectories?: string[]
+  includeHidden?: boolean
 }
+
+export const COMMON_EXCLUDED_DIRECTORIES = [
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "coverage",
+  ".next",
+  "vendor",
+  "__pycache__",
+  ".venv",
+] as const
+
+export const DEFAULT_EXCLUDED_DIRECTORIES = ["node_modules", ".git"] as const
 
 export class FolderScanLimitError extends Error {
   constructor(message: string) {
@@ -31,6 +47,25 @@ function isDirectoryHandle(
 
 function isJunkName(name: string): boolean {
   return [".DS_Store", "Thumbs.db", "desktop.ini"].includes(name)
+}
+
+export function parseExcludedDirectoryNames(value: string): Set<string> {
+  const names = value.split(",").map((name) => name.trim()).filter(Boolean)
+  for (const name of names) {
+    if (
+      name === "." ||
+      name === ".." ||
+      name.length > SHARED_FOLDER_LIMITS.maxNameLength ||
+      /[\/\\\u0000-\u001f\u007f-\u009f]/.test(name)
+    ) {
+      throw new Error("Enter folder names only, separated by commas.")
+    }
+  }
+  return new Set(names.map((name) => name.toLocaleLowerCase()))
+}
+
+function isExcludedDirectory(name: string, excludedDirectories: ReadonlySet<string>): boolean {
+  return excludedDirectories.has(name.toLocaleLowerCase())
 }
 
 function isHiddenPath(path: string): boolean {
@@ -64,6 +99,7 @@ async function scanDirectory(
   root: LocalFolderDirectoryHandle,
   signal: AbortSignal,
   onProgress: (count: number) => void,
+  excludedDirectories: ReadonlySet<string>,
 ): Promise<PickedFolder> {
   const entries: SharedFolderEntry[] = []
   const filesByPath = new Map<string, File>()
@@ -80,6 +116,7 @@ async function scanDirectory(
     for await (const [name, handle] of current.handle.entries()) {
       if (signal.aborted) throw new DOMException("Scan cancelled", "AbortError")
       if (isJunkName(name)) continue
+      if (isDirectoryHandle(handle) && isExcludedDirectory(name, excludedDirectories)) continue
       const path = current.path ? `${current.path}/${name}` : name
       validatePath(path)
       children.push({ name, path, handle })
@@ -114,12 +151,19 @@ async function scanDirectory(
       await yieldToEventLoop()
     }
   }
-  return { rootName: root.name, entries, handle: root, filesByPath }
+  return {
+    rootName: root.name,
+    entries,
+    handle: root,
+    filesByPath,
+    excludedDirectories: [...excludedDirectories],
+  }
 }
 
 async function selectFallbackFolder(
   signal: AbortSignal,
   onProgress: (count: number) => void,
+  excludedDirectories: ReadonlySet<string>,
 ): Promise<PickedFolder | null> {
   return new Promise((resolve, reject) => {
     const input = document.createElement("input")
@@ -170,6 +214,7 @@ async function selectFallbackFolder(
           for (const file of files.slice(offset, offset + 16)) {
             const parts = file.webkitRelativePath.split("/")
             if (parts[0] !== rootName || parts.length < 2) continue
+            if (parts.slice(1, -1).some((part) => isExcludedDirectory(part, excludedDirectories))) continue
             const relative = parts.slice(1).join("/")
             if (isJunkName(parts[parts.length - 1])) continue
             validatePath(relative)
@@ -197,7 +242,12 @@ async function selectFallbackFolder(
           await yieldToEventLoop()
         }
         // The directory-input fallback cannot discover empty directories because browsers expose files only.
-        resolve({ rootName, entries, filesByPath })
+        resolve({
+          rootName,
+          entries,
+          filesByPath,
+          excludedDirectories: [...excludedDirectories],
+        })
       })().catch(reject)
     }
     input.addEventListener("change", onChange, { once: true })
@@ -211,6 +261,7 @@ async function selectFallbackFolder(
 export async function pickFolder(
   signal: AbortSignal,
   onProgress: (count: number) => void,
+  excludedDirectories: ReadonlySet<string> = new Set(),
 ): Promise<PickedFolder | null> {
   const pickerWindow = window as Window & {
     showDirectoryPicker?: (options: { mode: "read" }) => Promise<LocalFolderDirectoryHandle>
@@ -218,14 +269,14 @@ export async function pickFolder(
   if (pickerWindow.showDirectoryPicker) {
     try {
       const root = await pickerWindow.showDirectoryPicker({ mode: "read" })
-      return await scanDirectory(root, signal, onProgress)
+      return await scanDirectory(root, signal, onProgress, excludedDirectories)
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return null
       throw error
     }
   }
   if ("webkitdirectory" in document.createElement("input")) {
-    return selectFallbackFolder(signal, onProgress)
+    return selectFallbackFolder(signal, onProgress, excludedDirectories)
   }
   throw new Error("Your browser can't select folders. Try a desktop browser.")
 }
@@ -233,10 +284,14 @@ export async function pickFolder(
 export function makeManifest(
   folder: PickedFolder,
   includeHidden: boolean,
+  excludedDirectories: ReadonlySet<string> = new Set(),
 ): SharedFolderManifest {
-  const entries = folder.entries.filter((entry) =>
-    includeHidden || !isHiddenPath(entry.p),
-  ).map((entry, id) => ({ ...entry, id }))
+  const entries = folder.entries.filter((entry) => {
+    if (!includeHidden && isHiddenPath(entry.p)) return false
+    const segments = entry.p.split("/")
+    const directories = entry.k === "d" ? segments : segments.slice(0, -1)
+    return !directories.some((name) => isExcludedDirectory(name, excludedDirectories))
+  }).map((entry, id) => ({ ...entry, id }))
   const manifest = sharedFolderManifestSchema.parse({
     v: 1,
     rootName: folder.rootName,

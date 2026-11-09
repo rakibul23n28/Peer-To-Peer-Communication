@@ -27,7 +27,9 @@ interface SharedFolderViewerProps {
   invalidCount: number
   onClose: () => void
   onPreviewFile?: (entryId: number) => void
+  onDownloadFile?: (entryId: number) => void
   previewDisabled?: boolean
+  downloadDisabled?: boolean
 }
 
 function formatSize(size: number): string {
@@ -104,7 +106,9 @@ export function SharedFolderViewer({
   invalidCount,
   onClose,
   onPreviewFile,
+  onDownloadFile,
   previewDisabled = false,
+  downloadDisabled = false,
 }: SharedFolderViewerProps) {
   const root = useMemo(() => buildSharedFolderTree(manifest.entries), [manifest])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
@@ -241,6 +245,7 @@ export function SharedFolderViewer({
         <div className="orbit-folder-tree-virtual" role="group" style={{ height: rows.length * rowHeight }}>
           {visibleRows.map((row, offset) => {
             const index = visibleStart + offset
+            const entryId = row.node.entryId
             const isExpanded = expanded.has(row.node.path) || Boolean(filter && row.hasChildren)
             return <div
               id={`orbit-folder-row-${index}`}
@@ -278,6 +283,26 @@ export function SharedFolderViewer({
               <span className="orbit-folder-tree-name">{row.node.name}</span>
               {row.node.kind === "f" && <span className="orbit-folder-tree-size">{formatSize(row.node.size ?? 0)}</span>}
               {row.node.kind === "d" && <span className="orbit-folder-tree-count">{row.node.children.size} items</span>}
+              {row.node.kind === "f" && entryId !== undefined && <>
+                <button
+                  type="button"
+                  aria-label={`Preview ${row.node.name}`}
+                  disabled={previewDisabled}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onPreviewFile?.(entryId)
+                  }}
+                >Preview</button>
+                <button
+                  type="button"
+                  aria-label={`Download ${row.node.name}`}
+                  disabled={downloadDisabled}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDownloadFile?.(entryId)
+                  }}
+                >Download</button>
+              </>}
             </div>
           })}
         </div>

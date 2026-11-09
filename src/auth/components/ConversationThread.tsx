@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, RefObject } from 'react';
 import type { ConversationSummary, EncryptedMessage, UserIdentity } from '../session';
 import type { DeviceIdentity } from '../keyStore';
@@ -13,9 +13,12 @@ import { SharedFolderViewer } from '../shared-folders/SharedFolderViewer';
 import type { PickedFolder } from '../shared-folders/picker';
 import { PreviewPane } from '../shared-folders/PreviewPane';
 import { PreviewSessionManager } from '../shared-folders/previewSession';
+import { registerDownload, updateDownloadProgress } from '../shared-folders/downloadStore';
+import { sanitizePathSegment } from '../shared-folders/downloadCore';
 
 export type SharedFolderTimelineItem = SharedFolderRecord & {
   status: 'pending' | 'ready' | 'error' | 'revoked';
+  errorMessage?: string;
   manifest?: SharedFolderManifest;
   invalidCount?: number;
   fileCount?: number;
@@ -93,7 +96,7 @@ interface ConversationThreadProps {
   onReply: (id: string) => void;
   onReact: (item: ThreadMessage, reaction: string) => void;
   onOfferFile: (file: File) => void;
-  onShareFolder: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder) => Promise<void>;
+  onShareFolder: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder, allowDownloads: boolean) => Promise<void>;
   onPreviewSignal: (signal: PreviewSignal) => void;
   onRevokeFolder: (id: string) => void;
   onReplyChange: (id: string | null) => void;
@@ -193,6 +196,11 @@ export function ConversationThread({
   const [viewerShareId, setViewerShareId] = useState<string | null>(null);
   const [previewEntryId, setPreviewEntryId] = useState<number | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const [remoteDownloadAllowed, setRemoteDownloadAllowed] = useState(false);
+  const [downloadStarter, setDownloadStarter] = useState<
+    typeof import('../shared-folders/downloadEngine').startFileDownload | null
+  >(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const viewerItem = threadMessages.find((item) => item.sharedFolder?.id === viewerShareId);
   const previewEntry: SharedFolderEntry | undefined = viewerItem?.sharedFolder?.manifest?.entries
@@ -207,6 +215,56 @@ export function ConversationThread({
       )
     : [];
   const previewSiblingIndex = previewSiblings.findIndex(({ id }) => id === previewEntry?.id);
+  useEffect(() => {
+    const shared = viewerItem?.sharedFolder
+    if (!shared || shared.status !== 'ready' || shared.ownerId === user.id || !deviceIdentity) {
+      setRemoteDownloadAllowed(false)
+      return
+    }
+    let active = true
+    void import('../shared-folders/downloadEngine').then(({ startFileDownload }) => {
+      if (active) setDownloadStarter(() => startFileDownload)
+    }).catch((error: unknown) => {
+      if (active) setDownloadError(error instanceof Error ? error.message : 'Downloads could not be loaded.')
+    })
+    const session = previewSessionManager.open(shared.id, conversation, deviceIdentity, onPreviewSignal)
+    const unsubscribe = session.subscribeDownloadCapabilities((caps) => setRemoteDownloadAllowed(caps.download))
+    void session.getDownloadCapabilities().then((caps) => {
+      setRemoteDownloadAllowed(caps.download)
+    }).catch(() => setRemoteDownloadAllowed(false))
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [conversation, deviceIdentity, onPreviewSignal, previewSessionManager, user.id, viewerItem?.sharedFolder])
+  const downloadSharedFile = (entryId: number) => {
+    const shared = viewerItem?.sharedFolder;
+    const entry = shared?.manifest?.entries.find((item) => item.id === entryId && item.k === 'f');
+    if (!shared || shared.ownerId === user.id || !entry || !deviceIdentity) return;
+    if (!downloadStarter) {
+      setDownloadError('Downloads are still loading. Try again in a moment.')
+      return
+    }
+    setDownloadError('');
+    const session = previewSessionManager.open(shared.id, conversation, deviceIdentity, onPreviewSignal);
+    const name = entry.p.split('/').pop() ?? `file-${entry.id}`;
+    void downloadStarter({
+      session,
+      info: {
+        shareId: shared.id,
+        conversation,
+        entryId: entry.id,
+        path: entry.p,
+        size: entry.s ?? 0,
+        mtime: entry.m,
+      },
+      localName: sanitizePathSegment(name, entry.id),
+      onProgress: (progress, id) => updateDownloadProgress(id, progress),
+      onCreated: (engine) => registerDownload(engine, name),
+    }).catch((error: unknown) => {
+      setDownloadError(error instanceof Error ? error.message : 'Could not start this download.');
+    });
+  };
 
   return <div className="orbit-thread">
     <header className="orbit-thread-header">
@@ -307,7 +365,7 @@ export function ConversationThread({
               </div>
               {item.sharedFolder.status === 'pending' && <div className="orbit-folder-card-skeleton" aria-hidden="true"><span /><span /></div>}
               {item.sharedFolder.status === 'error' && <div className="orbit-folder-card-error" role="alert">
-                <span>Couldn't open this shared folder</span>
+                <span>{item.sharedFolder.errorMessage ?? "Couldn't open this shared folder"}</span>
                 <button type="button" onClick={onRetryThread}>Retry</button>
               </div>}
               {item.sharedFolder.status === 'revoked' && <p className="orbit-folder-card-revoked" role="status">This folder is no longer shared.</p>}
@@ -506,7 +564,10 @@ export function ConversationThread({
       onClose={() => setViewerShareId(null)}
       previewDisabled={viewerItem.sharedFolder.ownerId === user.id}
       onPreviewFile={(entryId) => setPreviewEntryId(entryId)}
+      onDownloadFile={downloadSharedFile}
+      downloadDisabled={viewerItem.sharedFolder.ownerId === user.id || !deviceIdentity || !remoteDownloadAllowed || !downloadStarter}
     />}
+    {downloadError && <p className="orbit-download-error" role="alert">{downloadError}</p>}
     {viewerItem?.sharedFolder?.status === 'ready' &&
       viewerItem.sharedFolder.ownerId !== user.id &&
       previewEntry &&
@@ -519,6 +580,7 @@ export function ConversationThread({
         previousEntry={previewSiblingIndex > 0 ? previewSiblings[previewSiblingIndex - 1] : undefined}
         nextEntry={previewSiblingIndex >= 0 ? previewSiblings[previewSiblingIndex + 1] : undefined}
         sessionManager={previewSessionManager}
+        onDownload={remoteDownloadAllowed && downloadStarter ? () => downloadSharedFile(previewEntry.id) : undefined}
         onSignal={onPreviewSignal}
         onNavigate={(entryId) => setPreviewEntryId(entryId)}
         onClose={() => setPreviewEntryId(null)}

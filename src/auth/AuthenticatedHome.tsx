@@ -36,9 +36,16 @@ import { createSharedFolder, listSharedFolders, revokeSharedFolder } from './sha
 import { makeManifest, pickFolder, type PickedFolder } from './shared-folders/picker';
 import { PreviewServer, type PreviewServerNotice } from './shared-folders/previewServer';
 import { PreviewSessionManager } from './shared-folders/previewSession';
-import { deleteFolderHandle, saveFolderHandle } from './shared-folders/sourceStorage';
+import { DownloadsPanel } from './shared-folders/DownloadsPanel';
+import {
+  deleteFolderHandle,
+  getFolderSelection,
+  saveFolderHandle,
+  saveFolderSelection,
+} from './shared-folders/sourceStorage';
 import type { PreviewSignal } from '../shared/previewProtocol';
 import {
+  type SharedFolderRecord,
   type SharedFolderManifest,
 } from '../shared/sharedFolders';
 import { getDeviceIdentity, getDeviceIdentityForVersion, getSavedDeviceIdentities, type DeviceIdentity } from './keyStore';
@@ -691,6 +698,46 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     return keyRequest;
   }, []);
 
+  const decryptFolderWithAvailableKeyVersions = useCallback(async (
+    identity: DeviceIdentity,
+    conversation: ConversationSummary,
+    record: SharedFolderRecord,
+  ) => {
+    const identities = [identity, ...await getSavedDeviceIdentities(user.id)]
+      .filter((saved, index, all) =>
+        all.findIndex((candidate) => candidate.fingerprint === saved.fingerprint) === index,
+      );
+    const currentPeerVersion = conversation.peer.keyVersion;
+    const peerVersions = Array.from(
+      { length: Math.min(currentPeerVersion, 64) },
+      (_unused, index) => currentPeerVersion - index,
+    );
+    let lastFailure: unknown;
+
+    for (const localIdentity of identities) {
+      for (const version of peerVersions) {
+        try {
+          const publicKey = await peerPublicKeyForVersion(conversation, version);
+          const key = await derivePeerKey(
+            localIdentity,
+            conversation.id,
+            publicKey,
+            'orbit-shared-folder-v1',
+          );
+          return await decryptFolderManifest(record, key, conversation.id, record.id);
+        } catch (error) {
+          lastFailure = error;
+        }
+      }
+    }
+
+    throw new Error(
+      lastFailure instanceof Error && lastFailure.message.includes('too large')
+        ? lastFailure.message
+        : "Couldn't decrypt with the saved keys. Ask the owner to reshare after checking both accounts' encryption keys.",
+    );
+  }, [peerPublicKeyForVersion, user.id]);
+
   const decryptWithAvailableKeyVersions = useCallback(async (
     identity: DeviceIdentity,
     conversation: ConversationSummary,
@@ -808,7 +855,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           });
         }
       },
-      onNotice: (next) => setPreviewOwnerNotice(next.type === 'activity' && !next.entryId ? null : next),
+      onNotice: (next) => setPreviewOwnerNotice(
+        next.type === 'activity' && !next.entryId
+          ? null
+          : { ...next, allowDownloads: server.isDownloadsAllowed(next.shareId) },
+      ),
     });
     previewServerRef.current = server;
     const closeOnExit = () => {
@@ -835,13 +886,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           const records = await listSharedFolders(conversation.id);
           for (const record of records) {
             if (!active || record.ownerId !== user.id) continue;
-            const key = await derivePeerKey(
-              deviceIdentity,
-              conversation.id,
-              conversation.peer.publicKey,
-              'orbit-shared-folder-v1',
-            );
-            const opened = await decryptFolderManifest(record, key, conversation.id, record.id);
+            const opened = await decryptFolderWithAvailableKeyVersions(deviceIdentity, conversation, record);
             previewOwnerSharesRef.current.set(record.id, {
               manifest: opened.manifest,
               conversation,
@@ -864,7 +909,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       }
     })();
     return () => { active = false };
-  }, [connection, conversations, deviceIdentity, user.id]);
+  }, [connection, conversations, decryptFolderWithAvailableKeyVersions, deviceIdentity, user.id]);
 
   useEffect(() => {
     if (dialog === 'settings') void refreshBlockedUsers();
@@ -968,7 +1013,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       },
       textDecrypted: Boolean(!item.deletedAt && item.ciphertext && item.iv && !decryptionError),
     };
-  })), [decryptWithAvailableKeyVersions, user.id, user.keyVersion]);
+  })), [decryptFolderWithAvailableKeyVersions, decryptWithAvailableKeyVersions, user.id, user.keyVersion]);
 
   const refreshThread = useCallback(async (includeSharedFolders = false) => {
     const conversation = conversationsRef.current.find(({ id }) => id === selectedId);
@@ -1059,17 +1104,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           };
         }
         try {
-          const key = await derivePeerKey(
+          const decryptedFolder = await decryptFolderWithAvailableKeyVersions(
             deviceIdentity,
-            conversation.id,
-            conversation.peer.publicKey,
-            'orbit-shared-folder-v1',
-          );
-          const decryptedFolder = await decryptFolderManifest(
+            conversation,
             record,
-            key,
-            conversation.id,
-            record.id,
           );
           const manifest: SharedFolderManifest = decryptedFolder.manifest;
           const fileEntries = manifest.entries.filter(({ k }) => k === 'f');
@@ -1085,10 +1123,16 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
               totalSize: fileEntries.reduce((total, entry) => total + (entry.s ?? 0), 0),
             },
           };
-        } catch {
+        } catch (reason) {
           return {
             ...baseMessage,
-            sharedFolder: { ...record, status: 'error' as const },
+            sharedFolder: {
+              ...record,
+              status: 'error' as const,
+              errorMessage: reason instanceof Error
+                ? reason.message
+                : "This folder couldn't be decrypted on this device.",
+            },
           };
         }
       }));
@@ -1759,6 +1803,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     manifest: SharedFolderManifest,
     shareId: string,
     picked: PickedFolder,
+    allowDownloads: boolean,
   ): Promise<void> {
     const conversation = selected;
     if (!conversation || !deviceIdentity || peerBlocked || !conversation.peer.keyAvailable) {
@@ -1770,7 +1815,6 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     if (!picked.handle && fallbackFiles.size !== manifest.entries.filter(({ k }) => k === 'f').length) {
       throw new Error('The browser did not retain the selected files for preview. Please choose the folder again.')
     }
-    if (picked.handle) await saveFolderHandle(shareId, picked.handle)
     const key = await derivePeerKey(
       deviceIdentity,
       conversation.id,
@@ -1779,6 +1823,12 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     )
     const encrypted = await encryptFolderManifest(manifest, key, conversation.id, shareId)
     try {
+      if (picked.handle) await saveFolderHandle(shareId, picked.handle)
+      await saveFolderSelection(shareId, {
+        excludedDirectories: picked.excludedDirectories ?? [],
+        includeHidden: picked.includeHidden ?? false,
+        allowDownloads,
+      })
       await createSharedFolder(conversation.id, {
         id: shareId,
         ciphertext: encrypted.ciphertext,
@@ -1793,9 +1843,10 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         handle: picked.handle,
         fallbackFiles: picked.handle ? undefined : fallbackFiles,
         persistHandle: false,
+        allowDownloads,
       })
     } catch (error) {
-      if (picked.handle) await deleteFolderHandle(shareId)
+      await deleteFolderHandle(shareId)
       throw error
     }
     previewOwnerSharesRef.current.set(shareId, { manifest, conversation })
@@ -1809,9 +1860,11 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     if (!saved || !server) return
     const controller = new AbortController()
     try {
-      const picked = await pickFolder(controller.signal, () => undefined)
+      const selection = await getFolderSelection(shareId)
+      const excludedDirectories = new Set(selection?.excludedDirectories ?? [])
+      const picked = await pickFolder(controller.signal, () => undefined, excludedDirectories)
       if (!picked) return
-      const rescanned = makeManifest(picked, true)
+      const rescanned = makeManifest(picked, selection?.includeHidden ?? true, excludedDirectories)
       if (!manifestsMatch(saved.manifest, rescanned)) {
         throw new Error('The selected folder does not match the shared folder structure.')
       }
@@ -1825,6 +1878,7 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         manifest: saved.manifest,
         handle: picked.handle,
         fallbackFiles: picked.handle ? undefined : fallbackFiles,
+        allowDownloads: selection?.allowDownloads ?? true,
       })
       setPreviewOwnerNotice(null)
       setNotice('Folder preview access restored.')
@@ -1833,6 +1887,28 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         type: 'repick',
         shareId,
         message: error instanceof Error ? error.message : 'Could not restore access to this folder.',
+      })
+    }
+
+  }
+
+  async function setShareDownloadsAllowed(shareId: string, allowed: boolean): Promise<void> {
+    try {
+      const selection = await getFolderSelection(shareId)
+      await saveFolderSelection(shareId, {
+        excludedDirectories: selection?.excludedDirectories ?? [],
+        includeHidden: selection?.includeHidden ?? false,
+        allowDownloads: allowed,
+      })
+      previewServerRef.current?.setDownloadsAllowed(shareId, allowed)
+      setPreviewOwnerNotice((notice) => notice?.shareId === shareId
+        ? { ...notice, allowDownloads: allowed }
+        : notice)
+    } catch (error) {
+      setPreviewOwnerNotice({
+        type: 'error',
+        shareId,
+        message: error instanceof Error ? error.message : 'Could not update download permission.',
       })
     }
   }
@@ -2068,20 +2144,34 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
   >
     {previewOwnerNotice && <aside className="orbit-preview-owner-banner" role="status">
       {previewOwnerNotice.type === 'activity'
-        ? <span>{previewOwnerNotice.viewerName ?? 'Your contact'} is viewing <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong>.</span>
+        ? <span>{previewOwnerNotice.viewerName ?? 'Your contact'} is {previewOwnerNotice.progress === undefined
+          ? <>viewing <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong></>
+          : <>downloading <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong> ({previewOwnerNotice.progress}%)</>}.</span>
         : previewOwnerNotice.type === 'permission'
           ? <span>{previewOwnerNotice.message ?? `Allow Orbit to access ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'shared folder'}’ again.`}</span>
           : previewOwnerNotice.type === 'repick'
             ? <span>{previewOwnerNotice.message ?? `Choose ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'the shared folder'}’ again to serve previews.`}</span>
             : <span>{previewOwnerNotice.message ?? 'Folder preview is temporarily unavailable.'}</span>}
       {previewOwnerNotice.type === 'activity'
-        ? <button type="button" onClick={() => void stopSharingFolder(previewOwnerNotice.shareId)}>Stop sharing</button>
+        ? <>
+          {previewOwnerNotice.progress !== undefined && <button type="button" onClick={() => previewServerRef.current?.stopDownloads(previewOwnerNotice.shareId)}>Stop download</button>}
+          <label className="orbit-owner-download-toggle">
+            <input
+              type="checkbox"
+              checked={previewOwnerNotice.allowDownloads ?? true}
+              onChange={(event) => void setShareDownloadsAllowed(previewOwnerNotice.shareId, event.target.checked)}
+            />
+            Allow downloads
+          </label>
+          <button type="button" onClick={() => void stopSharingFolder(previewOwnerNotice.shareId)}>Stop sharing</button>
+        </>
         : previewOwnerNotice.type === 'permission'
           ? <button type="button" onClick={() => void regrantPreviewFolder(previewOwnerNotice.shareId)}>Allow access</button>
           : previewOwnerNotice.type === 'repick'
             ? <button type="button" onClick={() => void restorePreviewFolder(previewOwnerNotice.shareId)}>Choose folder</button>
             : null}
     </aside>}
+    <DownloadsPanel />
     <ConversationSidebar
       user={user}
       busy={busy}

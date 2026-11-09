@@ -26,6 +26,12 @@ import {
 import type { DeviceIdentity } from "../src/auth/keyStore.ts"
 import type { ConversationSummary } from "../src/auth/session.ts"
 import {
+  COMMON_EXCLUDED_DIRECTORIES,
+  DEFAULT_EXCLUDED_DIRECTORIES,
+  makeManifest,
+  parseExcludedDirectoryNames,
+} from "../src/auth/shared-folders/picker.ts"
+import {
   getPreviewDescriptor,
   previewMagicMatches,
   zipHasRootEntry,
@@ -166,6 +172,7 @@ test("parses media ranges and produces no-store, nosniff partial response header
 })
 
 test("matches preview extensions to signatures and rejects binary-looking text", () => {
+  assert.equal(getPreviewDescriptor("paper.tex", 128).kind, "text")
   assert.equal(previewMagicMatches("image", "x.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), true)
   assert.equal(previewMagicMatches("image", "x.png", new Uint8Array([0xff, 0xd8, 0xff])), false)
   assert.equal(previewMagicMatches("pdf", "x.pdf", new TextEncoder().encode("%PDF-1.7")), true)
@@ -174,6 +181,27 @@ test("matches preview extensions to signatures and rejects binary-looking text",
   assert.equal(previewMagicMatches("text", "x.txt", new Uint8Array([65, 66, 0, 67])), false)
   assert.equal(getPreviewDescriptor("table.xlsx", 10).kind, "unsupported")
   assert.equal(getPreviewDescriptor("video.MOV", 10).mime, "video/quicktime")
+})
+
+test("folder exclusions are validated and removed before sharing", () => {
+  const excluded = parseExcludedDirectoryNames("cache, output")
+  assert.deepEqual([...excluded], ["cache", "output"])
+  assert.throws(() => parseExcludedDirectoryNames("../private"))
+  assert.ok(COMMON_EXCLUDED_DIRECTORIES.includes("node_modules"))
+  assert.ok(DEFAULT_EXCLUDED_DIRECTORIES.includes("node_modules"))
+  const manifest = makeManifest({
+    rootName: "Project",
+    entries: [
+      { id: 0, p: "src/app.ts", k: "f", s: 10, m: 1 },
+      { id: 1, p: "node_modules/pkg/index.js", k: "f", s: 20, m: 2 },
+      { id: 2, p: "node_modules/pkg", k: "d" },
+      { id: 3, p: "vendor/lib.js", k: "f", s: 30, m: 3 },
+    ],
+  }, false, new Set(["node_modules"]))
+  assert.deepEqual(manifest.entries.map(({ p, id }) => [id, p]), [
+    [0, "src/app.ts"],
+    [1, "vendor/lib.js"],
+  ])
 })
 
 test("detects DOCX content-types entries from a ZIP central directory", () => {

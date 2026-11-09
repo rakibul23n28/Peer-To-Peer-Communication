@@ -4796,6 +4796,69 @@
   line-height: 1.6;
 }
 
+.orbit-folder-exclusions {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  margin: 2px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  background: var(--orbit-bg);
+}
+
+.orbit-folder-exclusions legend {
+  padding: 0 5px;
+  color: var(--orbit-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.orbit-folder-exclusion-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+}
+
+.orbit-folder-exclusion-options .orbit-folder-toggle {
+  min-height: 34px;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.orbit-folder-exclusion-custom {
+  display: grid;
+  gap: 6px;
+  color: var(--orbit-muted);
+  font-size: 12px;
+}
+
+.orbit-folder-exclusion-custom input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--orbit-border);
+  border-radius: 9px;
+  color: var(--orbit-text);
+  background: var(--orbit-panel-raised);
+}
+
+.orbit-folder-exclusions-summary {
+  margin: 0;
+  color: var(--orbit-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.orbit-folder-exclusions-summary button {
+  padding: 0;
+  border: 0;
+  color: var(--orbit-cyan);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
 .orbit-folder-scan {
   justify-items: center;
   padding: 24px 8px;
@@ -6893,5 +6956,139 @@
 
   .orbit-shell[data-appearance] .orbit-folder-viewer {
     padding-inline: 9px;
+  }
+}
+
+.orbit-downloads-panel {
+  position: fixed;
+  z-index: 20;
+  right: 16px;
+  bottom: 16px;
+  color: var(--orbit-text);
+}
+
+.orbit-downloads-toggle,
+.orbit-downloads-panel section {
+  border: 1px solid var(--orbit-border);
+  border-radius: 12px;
+  background: var(--orbit-panel);
+  color: var(--orbit-text);
+  box-shadow: var(--orbit-shadow);
+}
+
+.orbit-downloads-toggle {
+  min-height: 44px;
+  padding: 8px 14px;
+}
+
+.orbit-downloads-panel section {
+  position: absolute;
+  right: 0;
+  bottom: 52px;
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(70dvh, 560px);
+  overflow: auto;
+  padding: 14px;
+}
+
+.orbit-downloads-panel header,
+.orbit-downloads-panel li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.orbit-downloads-panel h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.orbit-downloads-panel ul {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orbit-downloads-panel li {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--orbit-border);
+  padding-top: 10px;
+}
+
+.orbit-downloads-panel li strong,
+.orbit-downloads-panel li > span,
+.orbit-downloads-panel li > div {
+  flex-basis: 100%;
+}
+
+.orbit-downloads-panel li > span {
+  color: var(--orbit-muted);
+  font-size: 12px;
+}
+
+.orbit-downloads-panel li > div[role="progressbar"] {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--orbit-border);
+}
+
+.orbit-downloads-panel li > div[role="progressbar"] span {
+  display: block;
+  height: 100%;
+  background: var(--orbit-cyan);
+}
+
+.orbit-downloads-panel button {
+  min-height: 40px;
+}
+
+.orbit-download-error {
+  position: fixed;
+  z-index: 21;
+  right: 16px;
+  bottom: 76px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid var(--orbit-coral);
+  border-radius: 10px;
+  background: var(--orbit-panel);
+  color: var(--orbit-text);
+}
+
+.orbit-owner-download-toggle {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+}
+
+.orbit-folder-tree-row > button {
+  min-height: 40px;
+  padding: 4px 8px;
+}
+
+@media (max-width: 375px) {
+  .orbit-downloads-panel {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .orbit-downloads-panel section {
+    right: -2px;
+    width: calc(100vw - 16px);
+  }
+
+  .orbit-folder-tree-row {
+    gap: 4px;
+    padding-right: 4px;
+  }
+
+  .orbit-folder-tree-row > button {
+    padding-inline: 4px;
+    font-size: 11px;
   }
 }

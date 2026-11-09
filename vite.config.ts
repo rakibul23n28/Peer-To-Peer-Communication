@@ -30,6 +30,7 @@ export default defineConfig(({ mode }) => {
 react(),
       tailwindcss(),
       figmaSiteConfiguration(siteConfiguration),
+      previewServiceWorkerHeaders(),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
       figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
@@ -78,6 +79,29 @@ react(),
     },
   }
 })
+
+function previewServiceWorkerHeaders(): Plugin {
+  const setHeaders = (
+    _request: import('node:http').IncomingMessage,
+    response: import('node:http').ServerResponse,
+    next: (error?: Error) => void,
+  ) => {
+    response.setHeader('Cache-Control', 'no-cache')
+    response.setHeader('Service-Worker-Allowed', '/')
+    response.setHeader('Content-Type', 'application/javascript')
+    next()
+  }
+
+  return {
+    name: 'preview-service-worker-headers',
+    configureServer(server) {
+      server.middlewares.use('/__preview/sw.js', setHeaders)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/__preview/sw.js', setHeaders)
+    },
+  }
+}
 
 type FigmaSiteConfiguration = {
   title?: string

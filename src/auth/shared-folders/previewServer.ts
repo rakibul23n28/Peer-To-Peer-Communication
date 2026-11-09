@@ -25,9 +25,19 @@ import {
   getFolderHandle,
   getFallbackFile,
   saveFolderHandle,
+  getFolderSelection,
   retainFallbackFiles,
 } from "./sourceStorage"
 import { derivePreviewSessionKeys, encryptPreviewChunk } from "./previewCrypto"
+import {
+  DOWNLOAD_LIMITS,
+  decodeDownloadControl,
+  encodeDownloadChunkFrame,
+  encodeDownloadControl,
+  type DownloadControl,
+} from "../../shared/downloadProtocol"
+import { bytesToBase64, createDownloadRootHash, sha256 } from "./downloadCore"
+import { deriveDownloadSessionKeys, encryptDownloadChunk } from "./downloadCrypto"
 
 interface OwnerShare {
   shareId: string
@@ -35,6 +45,7 @@ interface OwnerShare {
   ownerId: string
   manifest: SharedFolderManifest
   fallbackFiles?: Map<number, File>
+  allowDownloads: boolean
 }
 
 type PreviewDirectoryHandle = FileSystemDirectoryHandle & {
@@ -49,7 +60,12 @@ interface OwnerSession {
   channel: RTCDataChannel | null
   keys: Awaited<ReturnType<typeof derivePreviewSessionKeys>>
   reads: Map<number, AbortController>
+  downloadChannel: RTCDataChannel | null
+  downloadKeys: Awaited<ReturnType<typeof deriveDownloadSessionKeys>>
+  downloadReads: Map<number, { controller: AbortController; entry: number }>
+  sentDownloadBlocks: Map<number, Set<number>>
   ready: boolean
+  downloadReady: boolean
 }
 
 export interface PreviewServerNotice {
@@ -59,6 +75,8 @@ export interface PreviewServerNotice {
   fileName?: string
   viewerName?: string
   message?: string
+  progress?: number
+  allowDownloads?: boolean
 }
 
 export interface PreviewServerOptions {
@@ -103,6 +121,7 @@ export class PreviewServer {
     handle?: LocalFolderDirectoryHandle
     fallbackFiles?: Map<number, File>
     persistHandle?: boolean
+    allowDownloads?: boolean
   }): Promise<void> {
     if (input.handle && input.persistHandle !== false) await saveFolderHandle(input.shareId, input.handle)
     const fallbackFiles = input.fallbackFiles
@@ -113,6 +132,7 @@ export class PreviewServer {
       ownerId: this.options.userId,
       manifest: input.manifest,
       fallbackFiles,
+      allowDownloads: input.allowDownloads ?? true,
     })
   }
 
@@ -123,6 +143,7 @@ export class PreviewServer {
   }): Promise<"ready" | "permission" | "repick"> {
     if (this.shares.has(input.shareId)) return "ready"
     const handle = await getFolderHandle(input.shareId)
+    const selection = await getFolderSelection(input.shareId)
     if (!handle) return "repick"
     const permission = await (handle as PreviewDirectoryHandle).queryPermission({ mode: "read" })
     this.shares.set(input.shareId, {
@@ -130,6 +151,7 @@ export class PreviewServer {
       conversation: input.conversation,
       ownerId: this.options.userId,
       manifest: input.manifest,
+      allowDownloads: selection?.allowDownloads ?? true,
     })
     if (permission !== "granted") return "permission"
     return "ready"
@@ -140,6 +162,41 @@ export class PreviewServer {
     if (!handle) return false
     const permission = await (handle as PreviewDirectoryHandle).requestPermission({ mode: "read" })
     return permission === "granted"
+  }
+
+  setDownloadsAllowed(shareId: string, allowed: boolean): void {
+    const share = this.shares.get(shareId)
+    if (share) share.allowDownloads = allowed
+    for (const session of this.sessions.values()) {
+      if (session.share.shareId !== shareId) continue
+      if (session.downloadChannel?.readyState === "open" && session.downloadReady) {
+        session.downloadChannel.send(encodeDownloadControl({
+          t: "caps",
+          download: allowed,
+          maxWindow: DOWNLOAD_LIMITS.defaultWindow,
+        }))
+      }
+      if (!allowed) {
+        for (const [rid, active] of session.downloadReads) {
+          if (session.downloadChannel) this.sendDownloadError(session.downloadChannel, rid, "download_not_allowed")
+          active.controller.abort()
+        }
+      }
+    }
+  }
+
+  isDownloadsAllowed(shareId: string): boolean {
+    return this.shares.get(shareId)?.allowDownloads ?? true
+  }
+
+  stopDownloads(shareId: string): void {
+    for (const session of this.sessions.values()) {
+      if (session.share.shareId !== shareId) continue
+      for (const [rid, active] of session.downloadReads) {
+        if (session.downloadChannel) this.sendDownloadError(session.downloadChannel, rid, "canceled")
+        active.controller.abort()
+      }
+    }
   }
 
   async acceptSignal(signal: {
@@ -202,6 +259,7 @@ export class PreviewServer {
       iceCandidatePoolSize: 2,
     })
     const keys = await derivePreviewSessionKeys(this.options.identity, share.conversation, sessionId)
+    const downloadKeys = await deriveDownloadSessionKeys(this.options.identity, share.conversation, sessionId)
     const session: OwnerSession = {
       share,
       sessionId,
@@ -209,7 +267,12 @@ export class PreviewServer {
       channel: null,
       keys,
       reads: new Map(),
+      downloadChannel: null,
+      downloadKeys,
+      downloadReads: new Map(),
+      sentDownloadBlocks: new Map(),
       ready: false,
+      downloadReady: false,
     }
     this.sessions.set(key, session)
     connection.onicecandidate = (event) => {
@@ -223,6 +286,14 @@ export class PreviewServer {
       }
     }
     connection.ondatachannel = (event) => {
+      if (event.channel.label === "orbit-dl-v1") {
+        this.bindDownloadChannel(session, event.channel, viewerName)
+        return
+      }
+      if (event.channel.label !== "orbit-preview-v1") {
+        event.channel.close()
+        return
+      }
       session.channel = event.channel
       event.channel.binaryType = "arraybuffer"
       event.channel.bufferedAmountLowThreshold = 128 * 1024
@@ -259,6 +330,260 @@ export class PreviewServer {
     const sdp = connection.localDescription?.sdp
     if (!sdp) throw new Error("Could not answer the preview connection.")
     this.options.onSignal({ shareId: share.shareId, sessionId, kind: "answer", payload: { sdp } })
+  }
+
+  private bindDownloadChannel(
+    session: OwnerSession,
+    channel: RTCDataChannel,
+    viewerName: string,
+  ): void {
+    session.downloadChannel = channel
+    channel.binaryType = "arraybuffer"
+    channel.bufferedAmountLowThreshold = 128 * 1024
+    channel.onmessage = (event) => {
+      if (typeof event.data !== "string") {
+        channel.close()
+        return
+      }
+      try {
+        const control = decodeDownloadControl(event.data)
+        if (control.t === "hello") {
+          if (control.shareId !== session.share.shareId || control.sessionId !== session.sessionId ||
+            session.downloadReady) {
+            channel.close()
+            return
+          }
+          session.downloadReady = true
+          channel.send(encodeDownloadControl({
+            t: "caps",
+            download: session.share.allowDownloads,
+            maxWindow: DOWNLOAD_LIMITS.defaultWindow,
+          }))
+        } else if (control.t === "cancel") {
+          session.downloadReads.get(control.rid)?.controller.abort()
+        } else if (control.t === "get" && session.downloadReady) {
+          void this.download(session, control, viewerName)
+        } else if (control.t === "verify" && session.downloadReady) {
+          void this.verifyDownload(session, control)
+        } else {
+          channel.close()
+        }
+      } catch {
+        channel.close()
+      }
+    }
+    channel.onclose = () => {
+      session.downloadChannel = null
+      for (const active of session.downloadReads.values()) active.controller.abort()
+      session.downloadReads.clear()
+    }
+  }
+
+  private async download(
+    session: OwnerSession,
+    request: Extract<DownloadControl, { t: "get" }>,
+    viewerName: string,
+  ): Promise<void> {
+    const channel = session.downloadChannel
+    if (!channel || channel.readyState !== "open" || !session.downloadReady) return
+    if (!session.share.allowDownloads) {
+      this.sendDownloadError(channel, request.rid, "download_not_allowed")
+      return
+    }
+    const entry = resolvePreviewFileEntry(session.share.manifest, request.entry)
+    if (!entry) {
+      this.sendDownloadError(channel, request.rid, "not_found")
+      return
+    }
+    const activeReads = [...session.downloadReads.values()]
+    const activeFiles = new Set(activeReads.map(({ entry: activeEntry }) => activeEntry))
+    const readsForEntry = activeReads.filter(({ entry: activeEntry }) => activeEntry === entry.id).length
+    if (session.downloadReads.has(request.rid) ||
+      readsForEntry >= DOWNLOAD_LIMITS.maxInflightReadsPerFile ||
+      (!activeFiles.has(entry.id) && activeFiles.size >= DOWNLOAD_LIMITS.maxConcurrentFiles)) {
+      this.sendDownloadError(channel, request.rid, "busy")
+      return
+    }
+    const controller = new AbortController()
+    session.downloadReads.set(request.rid, { controller, entry: entry.id })
+    const sentBlocksBefore = session.sentDownloadBlocks.get(entry.id) ?? new Set<number>()
+    const sentBytesBefore = [...sentBlocksBefore].reduce((total, blockIndex) =>
+      total + Math.min(request.blockSize, Math.max(0, (entry.s ?? 0) - blockIndex * request.blockSize)), 0)
+    this.options.onNotice({
+      type: "activity",
+      shareId: session.share.shareId,
+      entryId: entry.id,
+      fileName: entry.p.split("/").pop(),
+      viewerName,
+      progress: entry.s ? Math.min(100, Math.round((sentBytesBefore / entry.s) * 100)) : 0,
+    })
+    try {
+      const file = await this.resolveFile(session.share, entry.id, entry.p)
+      if (previewFileChanged(entry, file)) {
+        this.sendDownloadError(channel, request.rid, "changed")
+        return
+      }
+      const totalBlocks = Math.ceil(file.size / request.blockSize)
+      if (totalBlocks > DOWNLOAD_LIMITS.maxBlocks || request.first + request.count > totalBlocks) {
+        this.sendDownloadError(channel, request.rid, "range_invalid")
+        return
+      }
+      channel.send(encodeDownloadControl({
+        t: "head",
+        rid: request.rid,
+        size: file.size,
+        mtime: file.lastModified,
+      }))
+      let seq = 0
+      for (let index = request.first; index < request.first + request.count; index += 1) {
+        if (controller.signal.aborted || channel.readyState !== "open") return
+        const start = index * request.blockSize
+        const end = Math.min(file.size, start + request.blockSize)
+        const block = new Uint8Array(await file.slice(start, end).arrayBuffer())
+        const hash = await sha256(block)
+        channel.send(encodeDownloadControl({
+          t: "blk",
+          rid: request.rid,
+          index,
+          len: block.byteLength,
+          sha256: bytesToBase64(hash),
+        }))
+        for (let offset = 0; offset < block.byteLength; offset += DOWNLOAD_LIMITS.chunkBytes) {
+          if (controller.signal.aborted || channel.readyState !== "open") return
+          await waitForBuffer(channel, controller.signal)
+          const plaintext = block.subarray(offset, Math.min(offset + DOWNLOAD_LIMITS.chunkBytes, block.byteLength))
+          const ciphertext = await encryptDownloadChunk(
+            session.downloadKeys.ownerToViewer,
+            0,
+            session.share.shareId,
+            entry.id,
+            request.rid,
+            index,
+            seq,
+            plaintext,
+          )
+          channel.send(encodeDownloadChunkFrame(request.rid, seq, ciphertext))
+          seq += 1
+        }
+        let sentBlocks = session.sentDownloadBlocks.get(entry.id)
+        if (!sentBlocks) {
+          sentBlocks = new Set<number>()
+          session.sentDownloadBlocks.set(entry.id, sentBlocks)
+        }
+        sentBlocks.add(index)
+        const sentBytes = [...sentBlocks].reduce((total, blockIndex) =>
+          total + Math.min(request.blockSize, Math.max(0, file.size - blockIndex * request.blockSize)), 0)
+        this.options.onNotice({
+          type: "activity",
+          shareId: session.share.shareId,
+          entryId: entry.id,
+          fileName: entry.p.split("/").pop(),
+          viewerName,
+          progress: file.size === 0 ? 100 : Math.min(100, Math.round((sentBytes / file.size) * 100)),
+        })
+      }
+      if (!controller.signal.aborted && channel.readyState === "open") {
+        const currentFile = await this.resolveFile(session.share, entry.id, entry.p)
+        if (previewFileChanged(entry, currentFile) || currentFile.size !== file.size ||
+          currentFile.lastModified !== file.lastModified) {
+          this.sendDownloadError(channel, request.rid, "changed")
+        } else {
+          channel.send(encodeDownloadControl({ t: "done", rid: request.rid }))
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const code = error instanceof PreviewSourceError ? error.code : "io"
+        this.sendDownloadError(channel, request.rid, code)
+      }
+    } finally {
+      session.downloadReads.delete(request.rid)
+      if (![...session.downloadReads.values()].some(({ entry: activeEntry }) => activeEntry === entry.id)) {
+        session.sentDownloadBlocks.delete(entry.id)
+        this.options.onNotice({ type: "activity", shareId: session.share.shareId })
+      }
+    }
+  }
+
+  private async verifyDownload(
+    session: OwnerSession,
+    request: Extract<DownloadControl, { t: "verify" }>,
+  ): Promise<void> {
+    const channel = session.downloadChannel
+    if (!channel || channel.readyState !== "open") return
+    if (!session.share.allowDownloads) {
+      this.sendDownloadError(channel, request.rid, "download_not_allowed")
+      return
+    }
+    const entry = resolvePreviewFileEntry(session.share.manifest, request.entry)
+    if (!entry) {
+      this.sendDownloadError(channel, request.rid, "not_found")
+      return
+    }
+    const activeReads = [...session.downloadReads.values()]
+    const activeFiles = new Set(activeReads.map(({ entry: activeEntry }) => activeEntry))
+    const readsForEntry = activeReads.filter(({ entry: activeEntry }) => activeEntry === entry.id).length
+    if (session.downloadReads.has(request.rid) ||
+      readsForEntry >= DOWNLOAD_LIMITS.maxInflightReadsPerFile ||
+      (!activeFiles.has(entry.id) && activeFiles.size >= DOWNLOAD_LIMITS.maxConcurrentFiles)) {
+      this.sendDownloadError(channel, request.rid, "busy")
+      return
+    }
+    const controller = new AbortController()
+    session.downloadReads.set(request.rid, { controller, entry: entry.id })
+    const startedAt = Date.now()
+    try {
+      const file = await this.resolveFile(session.share, entry.id, entry.p)
+      if (previewFileChanged(entry, file)) {
+        this.sendDownloadError(channel, request.rid, "changed")
+        return
+      }
+      channel.send(encodeDownloadControl({
+        t: "head",
+        rid: request.rid,
+        size: file.size,
+        mtime: file.lastModified,
+      }))
+      const totalBlocks = Math.ceil(file.size / request.blockSize)
+      if (totalBlocks > DOWNLOAD_LIMITS.maxBlocks) {
+        this.sendDownloadError(channel, request.rid, "range_invalid")
+        return
+      }
+      const hashes = new Uint8Array(totalBlocks * 32)
+      for (let index = 0; index < totalBlocks; index += 1) {
+        if (controller.signal.aborted || channel.readyState !== "open") return
+        const start = index * request.blockSize
+        const block = new Uint8Array(await file.slice(start, Math.min(file.size, start + request.blockSize)).arrayBuffer())
+        hashes.set(await sha256(block), index * 32)
+      }
+      const currentFile = await this.resolveFile(session.share, entry.id, entry.p)
+      if (previewFileChanged(entry, currentFile) || currentFile.size !== file.size ||
+        currentFile.lastModified !== file.lastModified) {
+        this.sendDownloadError(channel, request.rid, "changed")
+        return
+      }
+      const root = await createDownloadRootHash(request.blockSize, file.size, hashes)
+      channel.send(encodeDownloadControl({
+        t: "vroot",
+        rid: request.rid,
+        size: file.size,
+        root: bytesToBase64(root),
+        ms: Date.now() - startedAt,
+      }))
+    } catch (error) {
+      const code = error instanceof PreviewSourceError ? error.code : "io"
+      this.sendDownloadError(channel, request.rid, code)
+    } finally {
+      session.downloadReads.delete(request.rid)
+    }
+  }
+
+  private sendDownloadError(
+    channel: RTCDataChannel,
+    rid: number,
+    code: Extract<DownloadControl, { t: "err" }>["code"],
+  ): void {
+    if (channel.readyState === "open") channel.send(encodeDownloadControl({ t: "err", rid, code }))
   }
 
   private async read(
@@ -376,6 +701,8 @@ export class PreviewServer {
     this.sessions.delete(key)
     for (const controller of session.reads.values()) controller.abort()
     session.reads.clear()
+    for (const active of session.downloadReads.values()) active.controller.abort()
+    session.downloadReads.clear()
     session.channel?.close()
     session.connection.close()
   }

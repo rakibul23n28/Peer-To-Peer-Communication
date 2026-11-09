@@ -2,7 +2,10 @@ import { useMemo, useRef, useState } from "react"
 
 import type { SharedFolderManifest } from "../../shared/sharedFolders"
 import {
+  COMMON_EXCLUDED_DIRECTORIES,
+  DEFAULT_EXCLUDED_DIRECTORIES,
   makeManifest,
+  parseExcludedDirectoryNames,
   pickFolder,
   previewEntries,
   summarizeManifest,
@@ -12,7 +15,7 @@ import {
 interface SharedFolderComposerProps {
   peerName: string
   disabled: boolean
-  onShare: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder) => Promise<void>
+  onShare: (manifest: SharedFolderManifest, shareId: string, picked: PickedFolder, allowDownloads: boolean) => Promise<void>
   onClose: () => void
 }
 
@@ -36,35 +39,62 @@ export function SharedFolderComposer({
 }: SharedFolderComposerProps) {
   const [picked, setPicked] = useState<PickedFolder | null>(null)
   const [includeHidden, setIncludeHidden] = useState(false)
+  const [allowDownloads, setAllowDownloads] = useState(true)
+  const [excludedDirectories, setExcludedDirectories] = useState<Set<string>>(
+    () => new Set(DEFAULT_EXCLUDED_DIRECTORIES),
+  )
+  const [customExclusions, setCustomExclusions] = useState("")
   const [progress, setProgress] = useState(0)
   const [scanning, setScanning] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const abortRef = useRef<AbortController | null>(null)
 
+  const parsedExclusions = useMemo(() => {
+    try {
+      return {
+        names: new Set([...excludedDirectories, ...parseExcludedDirectoryNames(customExclusions)]),
+        error: "",
+      }
+    } catch (reason) {
+      return {
+        names: excludedDirectories,
+        error: reason instanceof Error ? reason.message : "Invalid folder exclusions.",
+      }
+    }
+  }, [customExclusions, excludedDirectories])
+
   const parsedManifest = useMemo(() => {
     if (!picked) return { manifest: null, error: "" }
+    if (parsedExclusions.error) return { manifest: null, error: parsedExclusions.error }
     try {
-      return { manifest: makeManifest(picked, includeHidden), error: "" }
+      return {
+        manifest: makeManifest(picked, includeHidden, parsedExclusions.names),
+        error: "",
+      }
     } catch (reason) {
       return {
         manifest: null,
         error: reason instanceof Error ? reason.message : "This folder exceeds Orbit's supported limits.",
       }
     }
-  }, [includeHidden, picked])
+  }, [includeHidden, parsedExclusions, picked])
   const manifest = parsedManifest.manifest
   const summary = manifest ? summarizeManifest(manifest) : null
   const preview = manifest ? previewEntries(manifest) : []
 
   async function chooseFolder() {
+    if (parsedExclusions.error) {
+      setError(parsedExclusions.error)
+      return
+    }
     const controller = new AbortController()
     abortRef.current = controller
     setScanning(true)
     setError("")
     setProgress(0)
     try {
-      const result = await pickFolder(controller.signal, setProgress)
+      const result = await pickFolder(controller.signal, setProgress, parsedExclusions.names)
       if (result) {
         setPicked(result)
         setIncludeHidden(false)
@@ -88,7 +118,11 @@ export function SharedFolderComposer({
     setSending(true)
     setError("")
     try {
-      await onShare(manifest, crypto.randomUUID(), picked!)
+      await onShare(manifest, crypto.randomUUID(), {
+        ...picked!,
+        excludedDirectories: [...parsedExclusions.names],
+        includeHidden,
+      }, allowDownloads)
       onClose()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not share this folder.")
@@ -118,6 +152,35 @@ export function SharedFolderComposer({
         : !picked
           ? <div className="orbit-folder-empty">
               <p>Select a local folder to preview its structure. File contents are never read.</p>
+              <fieldset className="orbit-folder-exclusions">
+                <legend>Exclude folders</legend>
+                <div className="orbit-folder-exclusion-options">
+                  {COMMON_EXCLUDED_DIRECTORIES.map((name) => <label className="orbit-folder-toggle" key={name}>
+                    <input
+                      type="checkbox"
+                      checked={excludedDirectories.has(name.toLocaleLowerCase())}
+                      onChange={(event) => setExcludedDirectories((current) => {
+                        const next = new Set(current)
+                        if (event.target.checked) next.add(name.toLocaleLowerCase())
+                        else next.delete(name.toLocaleLowerCase())
+                        return next
+                      })}
+                    />
+                    <span>{name}</span>
+                  </label>)}
+                </div>
+                <label className="orbit-folder-exclusion-custom">
+                  <span>Other folder names, separated by commas</span>
+                  <input
+                    type="text"
+                    value={customExclusions}
+                    onChange={(event) => setCustomExclusions(event.target.value)}
+                    placeholder="e.g. logs, cache, secrets"
+                    aria-invalid={Boolean(parsedExclusions.error)}
+                  />
+                </label>
+              </fieldset>
+              {parsedExclusions.error && <p className="orbit-folder-error" role="alert">{parsedExclusions.error}</p>}
               <button type="button" className="orbit-folder-primary" onClick={() => void chooseFolder()}>Choose folder</button>
             </div>
           : <div className="orbit-folder-preview">
@@ -129,6 +192,15 @@ export function SharedFolderComposer({
                 <input type="checkbox" checked={includeHidden} onChange={(event) => setIncludeHidden(event.target.checked)} />
                 <span>Include hidden files</span>
               </label>
+              <label className="orbit-folder-toggle">
+                <input type="checkbox" checked={allowDownloads} onChange={(event) => setAllowDownloads(event.target.checked)} />
+                <span>Allow {peerName} to download files (otherwise they can only preview).</span>
+              </label>
+              <p className="orbit-folder-exclusions-summary">
+                Excluded folders: {[...parsedExclusions.names].join(", ") || "none"}
+                {" · "}
+                <button type="button" onClick={() => setPicked(null)}>Change exclusions</button>
+              </p>
               <ul className="orbit-folder-preview-list" aria-label="Folder preview">
                 {preview.map((entry) => <li key={entry}>{entry}</li>)}
                 {manifest && manifest.entries.length > preview.length && <li>And {(manifest.entries.length - preview.length).toLocaleString()} more items…</li>}

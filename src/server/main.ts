@@ -104,7 +104,7 @@ app.use((request: Request, response: Response, next: NextFunction) => {
 const webRoot = resolve(process.cwd(), "dist")
 app.use("/__preview/sw.js", (_request: Request, response: Response, next: NextFunction) => {
   response.setHeader("Cache-Control", "no-cache")
-  response.setHeader("Service-Worker-Allowed", "/__preview/")
+  response.setHeader("Service-Worker-Allowed", "/")
   response.type("application/javascript")
   next()
 })

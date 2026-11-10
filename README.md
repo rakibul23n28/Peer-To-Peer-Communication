@@ -2,23 +2,37 @@
 
 ![Orbit favicon](./public/favicon.svg)
 
-**Orbit is a privacy-focused, one-to-one messaging application** for conversations that feel personal without sacrificing control over your data. Send end-to-end encrypted text messages, share files directly between peers, and start audio calls in a compact workspace with several distinct visual themes.
+**Orbit is a privacy-first communication workspace for private, one-to-one conversations.** It brings browser-encrypted messaging together with peer-to-peer file transfers, encrypted shared-folder browsing, owner-served file previews and downloads, audio calls, presence, and access controls. Its responsive workspace includes Home, People, Downloads, and Settings, with compact layout options and several distinct chat themes.
 
-The project is a full-stack TypeScript application: a React web client communicates with a NestJS API over HTTP and WebSockets, while PostgreSQL and Prisma persist accounts, conversations, and encrypted message data.
+Orbit is a full-stack TypeScript application. The React client uses a NestJS API for authenticated requests, real-time conversation events, and WebRTC signaling; PostgreSQL and Prisma persist accounts, conversations, and encrypted message data. Message encryption and peer-to-peer file and audio connections are handled in the browsers, so file contents and call audio are not uploaded to the application server.
 
 ## Screenshots
 
-The images below are served from the repository's `public/` directory and show the available sign-in, chat appearance, and audio-call experiences.
+These screenshots are served from `public/` and show Orbit's main workspace, folder-sharing flow, downloads, settings, and sign-in screen.
 
-| Screen / appearance | Preview |
+| Home dashboard | Shared-folder browser |
 | --- | --- |
-| Sign in | ![Orbit sign-in page](./public/login.png) |
-| Storybook | ![Orbit Storybook chat appearance](./public/StoryBook.jpeg) |
-| Minimal | ![Orbit Minimal chat appearance](./public/Minimal.jpeg) |
-| Watercolor | ![Orbit Watercolor chat appearance](./public/Watercolor.jpeg) |
-| Anime | ![Orbit Anime chat appearance](./public/Anime.jpeg) |
-| Midnight | ![Orbit Midnight chat appearance](./public/Midnight.jpeg) |
-| Audio call | ![Orbit audio call in the chat workspace](./public/audiocall.jpeg) |
+| ![Orbit home dashboard with activity, people, and shared folders](./public/home.jpeg) | ![Encrypted shared-folder browser with search and file actions](./public/shared-folder.jpeg) |
+
+| Downloads | Folder-sharing options |
+| --- | --- |
+| ![Orbit download history and transfer progress](./public/download.jpeg) | ![Folder-sharing dialog with directory exclusion options](./public/ignore.jpeg) |
+
+| Settings | Sign in |
+| --- | --- |
+| ![Orbit account and workspace settings](./public/settings.jpeg) | ![Orbit sign-in page](./public/login.png) |
+
+### Chat themes
+
+Orbit includes Storybook, Minimal, Watercolor, Anime, and Midnight appearances. Each changes the workspace palette and message styling; the examples below show the available theme screenshots.
+
+| Storybook | Minimal | Watercolor |
+| --- | --- | --- |
+| ![Orbit Storybook chat appearance](./public/storybooktheme.jpeg) | ![Orbit Minimal chat appearance](./public/minimaltheme.jpeg) | ![Orbit Watercolor chat appearance](./public/watercolortheme.jpeg) |
+
+| Anime | Midnight |
+| --- | --- |
+| ![Orbit Anime appearance selected in workspace settings](./public/animetheme.jpeg) | ![Orbit Midnight chat appearance](./public/midnighttheme.jpeg) |
 
 ## Features
 

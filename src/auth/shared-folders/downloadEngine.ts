@@ -59,6 +59,7 @@ export class DownloadEngine {
   private canceled = false
   private running: Promise<void> | null = null
   private bytesVerified = 0
+  private lastMessage?: string
   private readonly blockHashes: Uint8Array
 
   constructor(private readonly options: DownloadEngineOptions) {
@@ -68,6 +69,10 @@ export class DownloadEngine {
 
   get currentState(): DownloadState {
     return this.state
+  }
+
+  get failureMessage(): string | undefined {
+    return this.lastMessage
   }
 
   start(): Promise<void> {
@@ -336,6 +341,7 @@ export class DownloadEngine {
   }
 
   private emit(message?: string): void {
+    if (message) this.lastMessage = message
     this.options.onProgress({
       state: this.state,
       bytesVerified: this.bytesVerified,
@@ -448,38 +454,60 @@ export async function startFolderDownload(input: {
     if (node.kind === "d") await ensureDirectory(segments)
   }
 
+  const failures: Array<{ path: string; message: string }> = []
+  let completedFiles = 0
   for (let index = 0; index < resolvedFiles.length; index += 1) {
     const { node, segments } = resolvedFiles[index]
     const entry = node.entryId === undefined ? undefined : entriesById.get(node.entryId)
     if (!entry || entry.k !== "f" || entry.s === undefined) continue
-    const parent = await ensureDirectory(segments.slice(0, -1))
-    const fileHandle = await parent.getFileHandle(segments[segments.length - 1], { create: true })
-    const engine = new DownloadEngine({
-      session: input.session,
-      info: {
-        ...input.info,
-        entryId: entry.id,
+    input.onProgress(completedFiles, resolvedFiles.length, entry.p)
+    try {
+      const parent = await ensureDirectory(segments.slice(0, -1))
+      const fileHandle = await parent.getFileHandle(segments[segments.length - 1], { create: true })
+      const engine = new DownloadEngine({
+        session: input.session,
+        info: {
+          ...input.info,
+          entryId: entry.id,
+          path: entry.p,
+          size: entry.s,
+          mtime: entry.m,
+        },
+        localName: segments[segments.length - 1],
+        sink: new FsaSink(),
+        fileHandle,
+        onProgress: (progress, id) => {
+          input.onFileProgress(progress, id)
+          input.onProgress(completedFiles, resolvedFiles.length, entry.p)
+        },
+      })
+      input.onCreated(engine, segments.join("/"))
+      await engine.start()
+      if (engine.currentState !== "completed") {
+        failures.push({
+          path: entry.p,
+          message: engine.failureMessage ?? `The file ended in the ${engine.currentState} state.`,
+        })
+        continue
+      }
+      completedFiles += 1
+      input.onProgress(completedFiles, resolvedFiles.length, entry.p)
+    } catch (error) {
+      failures.push({
         path: entry.p,
-        size: entry.s,
-        mtime: entry.m,
-      },
-      localName: segments[segments.length - 1],
-      sink: new FsaSink(),
-      fileHandle,
-      onProgress: (progress, id) => {
-        input.onFileProgress(progress, id)
-        input.onProgress(index, resolvedFiles.length, entry.p)
-      },
-    })
-    input.onCreated(engine, segments.join("/"))
-    await engine.start()
-    if (engine.currentState !== "completed") {
-      throw new Error(`Could not download “${entry.p}”. Check the Downloads page for details.`)
+        message: getDownloadErrorMessage(error),
+      })
     }
-    input.onProgress(index + 1, resolvedFiles.length, entry.p)
   }
 
-  input.onProgress(resolvedFiles.length, resolvedFiles.length, "")
+  input.onProgress(completedFiles, resolvedFiles.length, "")
+  if (failures.length > 0) {
+    const first = failures[0]
+    throw new Error(
+      `${failures.length} of ${resolvedFiles.length} files could not be downloaded. ` +
+      `First: “${first.path}” — ${first.message} Check the Downloads page for per-file details.`,
+    )
+  }
 }
 
 function toBase64(bytes: Uint8Array): string {

@@ -8041,12 +8041,21 @@
   backdrop-filter: blur(16px);
 }
 
-.orbit-preview-owner-banner > span {
+.orbit-preview-owner-copy {
   min-width: 0;
   flex: 1;
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.orbit-preview-owner-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
 }
 
 .orbit-preview-owner-banner button {
@@ -8180,9 +8189,52 @@
     top: auto;
     right: max(12px, env(safe-area-inset-right));
     bottom: max(12px, env(safe-area-inset-bottom));
-    left: auto;
-    width: min(390px, calc(100vw - 24px));
-    align-items: center;
+    left: max(12px, env(safe-area-inset-left));
+    display: grid;
+    width: auto;
+    max-width: 520px;
+    max-height: min(42dvh, 240px);
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 9px;
+    padding: 10px 11px;
+  }
+
+  .orbit-preview-owner-copy {
+    width: 100%;
+    font-size: 12px;
+  }
+
+  .orbit-preview-owner-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .orbit-preview-owner-actions > button,
+  .orbit-preview-owner-actions > .orbit-owner-download-toggle {
+    min-width: 0;
+    min-height: 40px;
+    justify-content: center;
+    padding-inline: 5px;
+    font-size: 11px;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .orbit-preview-owner-actions .orbit-owner-download-toggle {
+    gap: 4px;
+    border: 1px solid var(--orbit-border);
+    border-radius: 9px;
+    background: var(--orbit-panel);
+  }
+
+  .orbit-preview-owner-actions .orbit-owner-download-toggle input {
+    flex: 0 0 auto;
+    margin: 0;
   }
 
   .orbit-folder-dialog,
@@ -8194,16 +8246,21 @@
 
 @media (max-width: 375px) {
   .orbit-preview-owner-banner {
-    width: calc(100vw - 20px);
+    left: max(10px, env(safe-area-inset-left));
     right: max(10px, env(safe-area-inset-right));
     bottom: max(10px, env(safe-area-inset-bottom));
     gap: 8px;
     padding: 8px 9px;
   }
 
-  .orbit-preview-owner-banner button {
+  .orbit-preview-owner-actions {
+    gap: 5px;
+  }
+
+  .orbit-preview-owner-actions > button,
+  .orbit-preview-owner-actions > .orbit-owner-download-toggle {
     min-height: 40px;
-    padding-inline: 8px;
+    padding-inline: 4px;
     font-size: 10px;
   }
 
@@ -9838,5 +9895,415 @@
     top: 8px;
     right: 8px;
     width: calc(100vw - 16px);
+  }
+}
+
+.orbit-shell[data-density='compact'] .orbit-sidebar {
+  padding: 14px 10px 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-sidebar .home-brand {
+  margin-bottom: 20px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-sidebar-heading {
+  min-height: 32px;
+  margin-bottom: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-conversation {
+  min-height: 52px;
+  gap: 8px;
+  margin-block: 1px;
+  padding: 6px 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-main {
+  padding-inline: clamp(8px, 2vw, 30px);
+}
+
+.orbit-shell[data-density='compact'] .orbit-thread-header {
+  min-height: 64px;
+  grid-template-columns: 34px 38px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding-block: 6px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-thread-back {
+  width: 32px;
+  height: 32px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-thread-avatar {
+  width: 38px;
+  height: 38px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-thread-person h1 {
+  margin-bottom: 2px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-thread-actions {
+  gap: 4px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-message-list {
+  gap: 6px;
+  padding: 12px clamp(4px, 2vw, 24px) 16px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-message {
+  margin-bottom: 5px;
+  padding: 8px 11px 6px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-composer {
+  padding: 7px 9px 6px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-composer-bottom {
+  min-height: 32px;
+  gap: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard {
+  padding-block: 9px 12px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-heading {
+  min-height: 38px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-grid {
+  gap: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-card {
+  padding: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-card > header {
+  min-height: 24px;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-list {
+  gap: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dashboard-folder-item,
+.orbit-shell[data-density='compact'] .orbit-dashboard-transfer,
+.orbit-shell[data-density='compact'] .orbit-dashboard-attention-row,
+.orbit-shell[data-density='compact'] .orbit-dashboard-recent-row,
+.orbit-shell[data-density='compact'] .orbit-dashboard-share-row {
+  gap: 7px;
+  padding-block: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-page,
+.orbit-shell[data-density='compact'] .orbit-downloads-page {
+  gap: 12px;
+  padding: clamp(8px, 1.5vw, 16px);
+  border-radius: 14px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-page-heading,
+.orbit-shell[data-density='compact'] .orbit-downloads-page-heading {
+  gap: 10px;
+  padding-bottom: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-page-heading h1,
+.orbit-shell[data-density='compact'] .orbit-downloads-page-heading h1 {
+  font-size: clamp(20px, 2.5vw, 28px);
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-grid {
+  gap: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-card {
+  min-height: 64px;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 11px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-people-card-avatar .orbit-avatar {
+  width: 36px;
+  height: 36px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-downloads-list {
+  gap: 6px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-downloads-list > li {
+  gap: 9px;
+  padding: 9px;
+  border-radius: 11px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-downloads-file-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-requests-page {
+  gap: 10px;
+  padding: 10px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-requests-heading {
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-request-list {
+  gap: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-request-card {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-request-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-request-copy p {
+  margin-top: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-details-header {
+  padding: 10px 12px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-details-content {
+  gap: 10px;
+  padding: 10px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-details-section {
+  gap: 7px;
+  padding-top: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-settings-heading {
+  margin-inline: -12px;
+  padding: 12px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-settings-nav {
+  gap: 3px;
+  padding-block: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-settings-nav button {
+  min-height: 32px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-privacy-settings {
+  gap: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-settings-row {
+  min-height: 36px;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-card {
+  gap: 7px;
+  padding: 8px;
+  border-radius: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-heading {
+  gap: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-heading > div {
+  gap: 2px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-actions {
+  gap: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-actions button,
+.orbit-shell[data-density='compact'] .orbit-folder-actions button,
+.orbit-shell[data-density='compact'] .orbit-folder-scan button,
+.orbit-shell[data-density='compact'] .orbit-folder-tree-controls > button,
+.orbit-shell[data-density='compact'] .orbit-folder-dialog > button {
+  min-height: 32px;
+  padding-inline: 9px;
+  border-radius: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-shared-folder-actions .orbit-icon-button,
+.orbit-shell[data-density='compact'] .orbit-file-card-footer .orbit-icon-button {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-dialog {
+  gap: 10px;
+  padding: 14px;
+  border-radius: 13px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-dialog-header,
+.orbit-shell[data-density='compact'] .orbit-folder-viewer-header {
+  gap: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-exclusions {
+  gap: 6px;
+  padding: 8px 9px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-toggle {
+  min-height: 34px;
+  gap: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-viewer {
+  width: min(100%, 700px);
+  gap: 4px;
+  padding: 11px;
+  border-radius: 13px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-viewer-header {
+  padding-bottom: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-tree-controls {
+  gap: 5px;
+  padding-block: 5px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-search {
+  min-height: 34px;
+  gap: 6px;
+  padding-inline: 8px;
+  border-radius: 7px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-tree-scroll {
+  height: min(50dvh, 420px);
+  min-height: 140px;
+  border-radius: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-preview-list {
+  max-height: 130px;
+  gap: 1px;
+  padding: 6px 8px 6px 24px;
+  border-radius: 8px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-folder-privacy {
+  padding: 7px 9px;
+  line-height: 1.45;
+}
+
+.orbit-shell[data-density='compact'] .orbit-dialog {
+  gap: 10px;
+  padding: 16px;
+}
+
+.orbit-shell[data-density='compact'] .orbit-inline-error {
+  gap: 7px;
+  padding: 8px 10px;
+}
+
+.auth-screen--auth .auth-card {
+  padding: 18px;
+}
+
+.auth-screen--auth .auth-card form {
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .orbit-shell[data-density='compact'] .orbit-main {
+    padding-inline: 7px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-dashboard-grid {
+    gap: 6px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-dashboard-card {
+    padding: 8px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-people-page,
+  .orbit-shell[data-density='compact'] .orbit-downloads-page,
+  .orbit-shell[data-density='compact'] .orbit-requests-page {
+    gap: 9px;
+    padding: 9px;
+    border-radius: 11px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-folder-dialog,
+  .orbit-shell[data-density='compact'] .orbit-folder-viewer {
+    gap: 7px;
+    padding: max(10px, env(safe-area-inset-top)) 9px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-folder-tree-controls > button,
+  .orbit-shell[data-density='compact'] .orbit-shared-folder-actions .orbit-icon-button,
+  .orbit-shell[data-density='compact'] .orbit-file-card-footer .orbit-icon-button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-thread-back,
+  .orbit-shell[data-density='compact'] .orbit-folder-close {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-folder-tree-controls > button,
+  .orbit-shell[data-density='compact'] .orbit-shared-folder-actions button,
+  .orbit-shell[data-density='compact'] .orbit-folder-actions button,
+  .orbit-shell[data-density='compact'] .orbit-folder-scan button,
+  .orbit-shell[data-density='compact'] .orbit-folder-dialog > button,
+  .orbit-shell[data-density='compact'] .orbit-settings-nav button {
+    min-height: 40px;
+  }
+
+  .orbit-shell[data-density='compact'] .orbit-settings-heading {
+    margin-inline: -10px;
+    padding: 10px;
+  }
+
+  .auth-screen--auth .auth-card {
+    padding: 16px;
   }
 }

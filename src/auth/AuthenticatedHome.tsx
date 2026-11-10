@@ -2791,17 +2791,18 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
         </form>
       </section>
     </div>}
-    {previewOwnerNotice && <aside className="orbit-preview-owner-banner" role="status">
-      {previewOwnerNotice.type === 'activity'
-        ? <span>{previewOwnerNotice.viewerName ?? 'Your contact'} is {previewOwnerNotice.progress === undefined
+    {previewOwnerNotice && <aside className={`orbit-preview-owner-banner is-${previewOwnerNotice.type}`} role="status">
+      <span className="orbit-preview-owner-copy">{previewOwnerNotice.type === 'activity'
+        ? <>{previewOwnerNotice.viewerName ?? 'Your contact'} is {previewOwnerNotice.progress === undefined
           ? <>viewing <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong></>
-          : <>downloading <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong> ({previewOwnerNotice.progress}%)</>}.</span>
+          : <>downloading <strong>{previewOwnerNotice.fileName ?? 'a file'}</strong> ({previewOwnerNotice.progress}%)</>}.</>
         : previewOwnerNotice.type === 'permission'
-          ? <span>{previewOwnerNotice.message ?? `Allow Orbit to access ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'shared folder'}’ again.`}</span>
+          ? <>{previewOwnerNotice.message ?? `Allow Orbit to access ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'shared folder'}’ again.`}</>
           : previewOwnerNotice.type === 'repick'
-            ? <span>{previewOwnerNotice.message ?? `Choose ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'the shared folder'}’ again to serve previews.`}</span>
-            : <span>{previewOwnerNotice.message ?? 'Folder preview is temporarily unavailable.'}</span>}
-      {previewOwnerNotice.type === 'activity'
+            ? <>{previewOwnerNotice.message ?? `Choose ‘${previewOwnerSharesRef.current.get(previewOwnerNotice.shareId)?.manifest.rootName ?? 'the shared folder'}’ again to serve previews.`}</>
+            : <>{previewOwnerNotice.message ?? 'Folder preview is temporarily unavailable.'}</>}</span>
+      <div className="orbit-preview-owner-actions">
+        {previewOwnerNotice.type === 'activity'
         ? <>
           {previewOwnerNotice.progress !== undefined && <button type="button" onClick={() => previewServerRef.current?.stopDownloads(previewOwnerNotice.shareId)}>Stop download</button>}
           <label className="orbit-owner-download-toggle">
@@ -2819,12 +2820,13 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
           : previewOwnerNotice.type === 'repick'
             ? <button type="button" onClick={() => void restorePreviewFolder(previewOwnerNotice.shareId)}>Choose folder</button>
             : null}
-      {previewOwnerNotice.type !== 'error' && previewOwnerNotice.type !== 'activity' && <button type="button" onClick={() => void setSharePaused(
-        previewOwnerNotice.shareId,
-        !previewServerRef.current?.isPaused(previewOwnerNotice.shareId),
-      )}>
-        {previewServerRef.current?.isPaused(previewOwnerNotice.shareId) ? 'Resume sharing' : 'Pause sharing'}
-      </button>}
+          {previewOwnerNotice.type !== 'error' && previewOwnerNotice.type !== 'activity' && <button type="button" onClick={() => void setSharePaused(
+            previewOwnerNotice.shareId,
+            !previewServerRef.current?.isPaused(previewOwnerNotice.shareId),
+          )}>
+            {previewServerRef.current?.isPaused(previewOwnerNotice.shareId) ? 'Resume sharing' : 'Pause sharing'}
+          </button>}
+      </div>
     </aside>}
     <ConversationSidebar
       workspaceView={workspaceView}

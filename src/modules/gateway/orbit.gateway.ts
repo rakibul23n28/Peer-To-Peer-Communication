@@ -952,10 +952,20 @@ export class OrbitGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     return { type: "preview.signal.ack", id: input.sessionId, payload: { delivered: true } }
   }
 
-  presenceHeartbeat(client: WebSocket) {
+  async presenceHeartbeat(client: WebSocket) {
+    const userId = await this.authenticatedUser(client)
     const connectionId = this.presenceConnectionIds.get(client)
-    const accepted = connectionId ? this.presence.heartbeat(connectionId) : false
-    return { type: "presence.heartbeat.ack", payload: { ok: accepted } }
+    if (!connectionId) return { type: "presence.heartbeat.ack", payload: { ok: false } }
+    const result = await this.presence.heartbeat(connectionId, userId)
+    if (result.snapshot) {
+      this.sendToSocket(client, {
+        type: "presence.snapshot",
+        id: randomUUID(),
+        ts: Date.now(),
+        payload: result.snapshot,
+      })
+    }
+    return { type: "presence.heartbeat.ack", payload: { ok: result.ok } }
   }
 
   async presenceIdle(client: WebSocket, body: unknown) {

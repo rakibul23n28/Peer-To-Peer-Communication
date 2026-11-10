@@ -130,14 +130,18 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  heartbeat(connectionId: string): boolean {
+  async heartbeat(
+    connectionId: string,
+    userId: string,
+  ): Promise<{ ok: boolean; snapshot?: Record<string, unknown> }> {
     if (!this.enforceRateLimit(
       connectionId,
       "heartbeat",
       PRESENCE_LIMITS.heartbeatMessagesPerMinute,
       60_000,
-    )) return false
-    return this.store.heartbeat(connectionId, Date.now())
+    )) return { ok: false }
+    if (this.store.heartbeat(connectionId, Date.now())) return { ok: true }
+    return { ok: true, snapshot: await this.connect(connectionId, userId) }
   }
 
   async setIdle(connectionId: string, idle: boolean): Promise<boolean> {

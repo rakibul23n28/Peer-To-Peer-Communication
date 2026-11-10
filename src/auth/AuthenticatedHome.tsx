@@ -1024,8 +1024,15 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
     }).catch((error: unknown) => {
       if (active) setNotice(error instanceof Error ? error.message : 'Presence could not be refreshed.');
     });
-    send('presence.heartbeat');
-    const heartbeat = window.setInterval(() => send('presence.heartbeat'), 25_000);
+    let lastHeartbeatAt = 0;
+    const sendHeartbeat = () => {
+      const now = Date.now();
+      if (now - lastHeartbeatAt < 5_000) return;
+      lastHeartbeatAt = now;
+      send('presence.heartbeat');
+    };
+    sendHeartbeat();
+    const heartbeat = window.setInterval(sendHeartbeat, 25_000);
     const publishIdle = () => {
       const idle = Date.now() - lastPresenceActivityRef.current >= 5 * 60_000;
       if (idleSentRef.current === idle) return;
@@ -1036,11 +1043,18 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       lastPresenceActivityRef.current = Date.now();
       publishIdle();
     };
+    const refreshPresence = () => {
+      if (document.visibilityState !== 'visible') return;
+      sendHeartbeat();
+      void reportShareAvailability();
+    };
     const idleCheck = window.setInterval(publishIdle, 15_000);
     const activityEvents = ['pointerdown', 'keydown', 'touchstart'] as const;
     for (const event of activityEvents) window.addEventListener(event, markActive, { passive: true });
     document.addEventListener('visibilitychange', publishIdle);
+    document.addEventListener('visibilitychange', refreshPresence);
     window.addEventListener('focus', markActive);
+    window.addEventListener('focus', refreshPresence);
     publishIdle();
     void reportShareAvailability();
     const checkAvailability = () => void reportShareAvailability();
@@ -1055,7 +1069,9 @@ export default function AuthenticatedHome({ user, onSignOut, busy, message }: Au
       window.clearInterval(availabilityTimer);
       for (const event of activityEvents) window.removeEventListener(event, markActive);
       document.removeEventListener('visibilitychange', publishIdle);
+      document.removeEventListener('visibilitychange', refreshPresence);
       window.removeEventListener('focus', markActive);
+      window.removeEventListener('focus', refreshPresence);
       window.removeEventListener('focus', checkAvailability);
       document.removeEventListener('visibilitychange', checkAvailability);
       idleSentRef.current = null;

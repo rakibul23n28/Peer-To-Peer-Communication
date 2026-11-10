@@ -7,7 +7,7 @@ export const PRESENCE_LIMITS = {
   viewingTtlMs: 45_000,
   availabilityCoalesceMs: 500,
   availabilityMessagesPerMinute: 20,
-  heartbeatMessagesPerMinute: 5,
+  heartbeatMessagesPerMinute: 10,
   idleMessagesPerMinute: 12,
   viewingMessagesPerMinute: 8,
   maxSnapshotPartners: 200,

@@ -9657,6 +9657,82 @@
   .orbit-shell .orbit-main {
     padding: 8px 10px max(10px, env(safe-area-inset-bottom));
   }
+
+  .orbit-shell[data-appearance] .orbit-folder-backdrop {
+    padding: 0;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: max(14px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 0;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px 10px;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer-header > div {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer-header h2 {
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-download-all {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+    margin: 0;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-viewer-header > .orbit-folder-close {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-access-note {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    overflow-wrap: anywhere;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-access-note button {
+    width: fit-content;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-tree-controls {
+    flex-wrap: wrap;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-search {
+    flex-basis: 100%;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-tree-scroll {
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+  }
+
+  .orbit-shell[data-appearance] .orbit-folder-tree-row {
+    min-width: 100%;
+  }
 }
 
 .orbit-incoming-requests {

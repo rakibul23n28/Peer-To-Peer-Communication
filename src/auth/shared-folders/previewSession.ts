@@ -72,15 +72,15 @@ export interface DownloadPeerCapabilities {
 
 function previewMessage(code: Extract<PreviewControl, { t: "err" }>["code"]): string {
   switch (code) {
-    case "not_found": return "This file is no longer available."
-    case "revoked": return "This folder is no longer shared."
-    case "changed": return "This file changed after it was shared."
-    case "permission_needed": return "The folder owner needs to re-allow access to the folder."
-    case "range_invalid": return "The requested preview range is invalid."
-    case "busy": return "The folder owner is busy. Retry this preview."
-    case "too_large": return "This file is too large to preview."
-    case "io": return "The file could not be read from the owner’s device."
-    default: return "The preview connection failed."
+    case "not_found": return "File no longer available."
+    case "revoked": return "Folder no longer shared."
+    case "changed": return "File changed after sharing."
+    case "permission_needed": return "Folder access needs re-approval."
+    case "range_invalid": return "Invalid preview range."
+    case "busy": return "Owner busy. Retry."
+    case "too_large": return "File too large to preview."
+    case "io": return "Could not read file."
+    default: return "Preview failed."
   }
 }
 
@@ -409,12 +409,12 @@ export class PreviewSession {
 
   failFromPeer(reason: "offline" | "needs_permission" | "needs_reselect" | "server_unavailable" = "offline"): void {
     const message = reason === "needs_permission"
-      ? "The folder owner needs to re-allow access before previews can start."
+      ? "Access needs to be re-allowed by the owner."
       : reason === "needs_reselect"
-        ? "The folder owner needs to select the shared folder again before previews can start."
+        ? "Owner must reselect the shared folder."
         : reason === "server_unavailable"
-          ? "Orbit could not verify the shared folder because its database is unavailable. Preview and download requests cannot continue until the server reconnects."
-        : "The folder owner is not online right now. Try again when they are back."
+          ? "Server unavailable. Try again later."
+        : "Folder owner is offline. Try again later."
     this.fail(new Error(message))
   }
 
